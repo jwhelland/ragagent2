@@ -371,46 +371,9 @@ docker-compose exec neo4j neo4j-admin database load neo4j --from-path=/backups
 - [Developer Tasks](plans/developer-tasks.md) - Implementation task breakdown
 - [Enhancements](plans/enhancements-summary.md) - Key enhancements and their impact
 
-## License
-
-[Add your license here]
-
-## Support
-
-For issues, questions, or contributions, please [add contact/support information].
-
 ## Roadmap
 
-### Phase 1 (Current) - Foundation
-- ✅ Project structure and configuration
-- ✅ Docker Compose setup
-- ⏳ PDF parsing and chunking
-- ⏳ Database schemas and managers
-- ⏳ Basic ingestion pipeline
-
-### Phase 2 - Entity Extraction
-- Entity extraction with spaCy and LLM
-- Entity merging and confidence scoring
-- Candidate database
-
-### Phase 3 - Normalization & Curation
-- Entity deduplication
-- Manual review interface
-- Batch curation operations
-
-### Phase 4 - Retrieval System
-- Hybrid vector + graph retrieval
-- Query processing
-- Response generation
-
-### Phase 5 - Incremental Updates
-- Document change detection
-- Differential updates
-
-### Phase 6 - Discovery & Polish
-- Entity discovery workflow
-- Testing and optimization
-- Production deployment
+See detailed milestones in `plans/phase-*-*.md`.
 
 ## Acknowledgments
 
@@ -419,4 +382,4 @@ Built using:
 - Qdrant for vector similarity search
 - Docling for PDF parsing
 - spaCy for NER
-- Ollama/OpenAI for LLM capabilities
+- OpenAI/Anthropic for LLM capabilities
