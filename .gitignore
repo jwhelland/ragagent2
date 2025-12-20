@@ -30,10 +30,12 @@ data/raw/*
 data/processed/*
 data/entities/*
 data/normalization/*
+data/discovery/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/entities/.gitkeep
 !data/normalization/.gitkeep
+!data/discovery/.gitkeep
 
 # Logs
 logs/
