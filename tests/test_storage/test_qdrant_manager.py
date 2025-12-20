@@ -168,9 +168,6 @@ class TestCollectionManagement:
         # Create once
         qdrant_manager.create_collections(recreate=True)
 
-        # Get initial info
-        info1 = qdrant_manager.get_collection_info(qdrant_manager.chunk_collection)
-
         # Recreate
         qdrant_manager.create_collections(recreate=True)
 

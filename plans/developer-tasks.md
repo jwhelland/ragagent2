@@ -48,16 +48,16 @@ This is the master task tracking document for the Graph RAG system implementatio
 
 **Focus:** spaCy NER, LLM integration, entity/relationship extraction, candidate storage
 
-- [ ] **2.1** spaCy NER Pipeline Setup
-- [ ] **2.2** LLM Integration (Ollama and OpenAI)
-- [ ] **2.3** Entity and Relationship Prompt Engineering
-- [ ] **2.4** Entity Merger
-- [ ] **2.5** Entity Candidate Database
-- [ ] **2.6** Extraction Pipeline Orchestration
+- [x] **2.1** spaCy NER Pipeline Setup
+- [x] **2.2** LLM Integration (Anthropic and OpenAI)
+- [x] **2.3** Entity and Relationship Prompt Engineering
+- [x] **2.4** Entity Merger
+- [x] **2.5** Entity Candidate Database
+- [x] **2.6** Extraction Pipeline Orchestration
 
 **Phase 2 Deliverables:**
 - spaCy NER pipeline with domain patterns
-- Flexible LLM integration (Ollama/OpenAI)
+- Flexible LLM integration (Anthropic/OpenAI)
 - Entity merger combining multiple sources
 - Entity candidate database
 - Complete extraction pipeline
@@ -68,15 +68,15 @@ This is the master task tracking document for the Graph RAG system implementatio
 
 **Focus:** Entity normalization, deduplication, curation interface, discovery pipeline
 
-- [ ] **3.1** String Normalization
-- [ ] **3.2** Fuzzy String Matching
-- [ ] **3.3** Acronym Resolution System
-- [ ] **3.4** Entity Deduplication with Embeddings
-- [ ] **3.5** Normalization Table Implementation
-- [ ] **3.6** CLI Review Interface - Core
-- [ ] **3.7** Entity Curation Operations
-- [ ] **3.8** Batch Curation Operations
-- [ ] **3.9** Discovery Pipeline
+- [x] **3.1** String Normalization
+- [x] **3.2** Fuzzy String Matching
+- [x] **3.3** Acronym Resolution System
+- [x] **3.4** Entity Deduplication with Embeddings
+- [x] **3.5** Normalization Table Implementation
+- [x] **3.6** CLI Review Interface - Core
+- [x] **3.7** Entity Curation Operations
+- [x] **3.8** Batch Curation Operations
+- [x] **3.9** Discovery Pipeline
 
 **Phase 3 Deliverables:**
 - String normalization and fuzzy matching
@@ -189,13 +189,13 @@ These tasks are on the critical path and must be completed for project success:
 
 ### Overall Progress
 - **Phase 1:** ☑ 10/10 tasks complete
-- **Phase 2:** ☐ 0/6 tasks complete
-- **Phase 3:** ☐ 0/9 tasks complete
+- **Phase 2:** ☑ 6/6 tasks complete
+- **Phase 3:** ☐ 8/9 tasks complete
 - **Phase 4:** ☐ 0/8 tasks complete
 - **Phase 5:** ☐ 0/5 tasks complete
 - **Phase 6:** ☐ 0/8 tasks complete
 
-**Total Progress:** 10/46 tasks complete (~22%)
+**Total Progress:** 24/46 tasks complete (~52%)
 
 ---
 
@@ -249,5 +249,5 @@ The project is complete when:
 
 ---
 
-**Last Updated:** 2025-12-15  
+**Last Updated:** 2025-12-19  
 **Version:** 1.0

@@ -10,7 +10,7 @@
 - Setup: `uv sync` (uses `uv.lock`), then run tools via `uv run ...`.
 - Services for integration work: `docker-compose up -d neo4j qdrant`.
 - Test suite: `uv run pytest` (default `-v --cov=src --cov-report=term-missing --cov-report=html` → `htmlcov/`).
-- Code quality: `uv run black src/ tests/`, `uv run ruff check src/ tests/`, `uv run mypy src/`.
+- Code quality: `uv run black src/ tests/`, `uv run ruff check src/ tests/`.
 - Operational scripts: `uv run python scripts/setup_databases.py` to initialize stores; `uv run python scripts/ingest_documents.py --input data/raw/ --batch-size 10` to ingest PDFs.
 
 ## Coding Style & Naming Conventions
@@ -18,6 +18,7 @@
 - Naming: modules/functions `snake_case`, classes `PascalCase`, constants `UPPER_SNAKE_CASE`.
 - Type hints expected (`disallow_untyped_defs=true`); prefer `pydantic` models for structured config/entities and centralize config access in `src/utils`.
 - Keep side effects thin and injectable; isolate retrieval and ingestion logic to enable mocking in tests.
+- Use pydantic models over dataclasses
 
 ## Testing Guidelines
 - Place tests in `tests/`; filenames `test_*.py`, functions `test_*`. Mirror `src/` layout for new modules.

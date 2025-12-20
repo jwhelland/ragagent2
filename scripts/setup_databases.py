@@ -5,7 +5,7 @@ This script creates the required schemas, constraints, indexes, and collections
 for the Graph RAG system. It can be run multiple times safely (idempotent).
 
 Usage:
-    python scripts/setup_databases.py
+    python scripts/setup_databases.py [--recreate-qdrant]
 
 Environment variables:
     NEO4J_URI - Neo4j connection URI (default: bolt://localhost:7687)
@@ -16,6 +16,7 @@ Environment variables:
     QDRANT_API_KEY - Qdrant API key (optional)
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -64,11 +65,12 @@ def setup_neo4j(config) -> bool:
             neo4j_manager.close()
 
 
-def setup_qdrant(config) -> bool:
+def setup_qdrant(config, *, recreate: bool = False) -> bool:
     """Set up Qdrant database with collections.
 
     Args:
         config: Application configuration
+        recreate: Whether to drop and recreate collections
 
     Returns:
         True if setup successful, False otherwise
@@ -80,7 +82,7 @@ def setup_qdrant(config) -> bool:
         qdrant_manager = QdrantManager(config.database)
 
         # Create collections
-        qdrant_manager.create_collections(recreate=False)
+        qdrant_manager.create_collections(recreate=recreate)
 
         # Verify setup
         is_healthy, message = qdrant_manager.health_check()
@@ -99,18 +101,32 @@ def setup_qdrant(config) -> bool:
             qdrant_manager.close()
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Initialize Neo4j and Qdrant schemas/collections.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--recreate-qdrant",
+        action="store_true",
+        help="Drop and recreate Qdrant collections (use after embedding dimension/model changes).",
+    )
+    return parser.parse_args()
+
+
 def main():
     """Main setup function."""
     logger.info("Starting database setup...")
 
     try:
+        args = parse_args()
         # Load configuration
         config = load_config()
         logger.info("Configuration loaded successfully")
 
         # Setup databases
         neo4j_success = setup_neo4j(config)
-        qdrant_success = setup_qdrant(config)
+        qdrant_success = setup_qdrant(config, recreate=args.recreate_qdrant)
 
         # Report results
         if neo4j_success and qdrant_success:

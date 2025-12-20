@@ -8,26 +8,34 @@ This module orchestrates the complete document processing workflow:
 5. Storage in Neo4j (graph) and Qdrant (vectors)
 """
 
+import re
 import time
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from types import TracebackType
+from typing import TYPE_CHECKING, Any, DefaultDict, Dict, List, Optional
 
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
-import re
-from datetime import datetime
-
+from src.extraction import EntityMerger, LLMExtractor, SpacyExtractor
 from src.ingestion.chunker import HierarchicalChunker
 from src.ingestion.pdf_parser import ParsedDocument
 from src.ingestion.text_cleaner import TextCleaner
 from src.ingestion.text_rewriter import TextRewriter
+from src.normalization import EntityDeduplicator, EntityRecord, StringNormalizer
 from src.storage.neo4j_manager import Neo4jManager
 from src.storage.qdrant_manager import QdrantManager
 from src.storage.schemas import Chunk as GraphChunk
-from src.storage.schemas import Document, EntityType
+from src.storage.schemas import Document, EntityCandidate, EntityType, RelationshipCandidate
 from src.utils.config import Config
 from src.utils.embeddings import EmbeddingGenerator
+
+if TYPE_CHECKING:
+    from src.ingestion.pdf_parser import PDFParser
+    from src.normalization.acronym_resolver import AcronymResolver
 
 
 class IngestionResult(BaseModel):
@@ -64,21 +72,38 @@ class IngestionPipeline:
         self.config = config
 
         # Initialize components
-        self.pdf_parser = None
-        self.text_cleaner = None
-        self.text_rewriter = None
-        self.chunker = None
-        self.embeddings = None
-        self.neo4j_manager = None
-        self.qdrant_manager = None
+        self.pdf_parser: PDFParser | None = None
+        self.text_cleaner: TextCleaner | None = None
+        self.text_rewriter: TextRewriter | None = None
+        self.chunker: HierarchicalChunker | None = None
+        self.embeddings: EmbeddingGenerator | None = None
+        self.neo4j_manager: Neo4jManager | None = None
+        self.qdrant_manager: QdrantManager | None = None
+        self.spacy_extractor: SpacyExtractor | None = None
+        self.llm_extractor: LLMExtractor | None = None
+        self.entity_merger: EntityMerger | None = None
+        self.string_normalizer: StringNormalizer | None = None
+        self.acronym_resolver: AcronymResolver | None = None
+        self.entity_deduplicator: EntityDeduplicator | None = None
 
         # Processing statistics
         self.stats = {
             "documents_processed": 0,
             "chunks_created": 0,
             "entities_created": 0,
+            "llm_entities_extracted": 0,
+            "llm_relationships_extracted": 0,
+            "merged_entities_created": 0,
+            "entity_candidates_stored": 0,
+            "relationship_candidates_stored": 0,
+            "acronym_definitions_added": 0,
+            "dedup_merge_suggestions": 0,
             "total_processing_time": 0.0,
         }
+
+        # Per-document extraction caches
+        self._spacy_entities_by_chunk: Dict[str | None, List[Any]] = {}
+        self._llm_entities_by_chunk: Dict[str | None, List[Any]] = {}
 
         logger.info("IngestionPipeline initialized")
 
@@ -103,10 +128,61 @@ class IngestionPipeline:
 
         if self.embeddings is None:
             self.embeddings = EmbeddingGenerator(self.config.database)
+        embeddings_generator = self.embeddings
+
+        if self.string_normalizer is None:
+            self.string_normalizer = StringNormalizer(self.config.normalization)
+
+        if self.entity_deduplicator is None and self.config.normalization.enable_semantic_matching:
+            self.entity_deduplicator = EntityDeduplicator(
+                config=self.config.normalization,
+                embedder=embeddings_generator,
+                database_config=self.config.database,
+            )
+
+        if self.acronym_resolver is None and self.config.normalization.enable_acronym_resolution:
+            from src.normalization.acronym_resolver import AcronymResolver
+
+            string_normalizer = self.string_normalizer
+            assert string_normalizer is not None
+            self.acronym_resolver = AcronymResolver(
+                config=self.config.normalization,
+                normalizer=string_normalizer,
+            )
+
+        if self.spacy_extractor is None:
+            try:
+                self.spacy_extractor = SpacyExtractor(self.config.extraction.spacy)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "spaCy extractor initialization failed; continuing without spaCy extraction",
+                    error=str(exc),
+                )
+
+        if self.llm_extractor is None and self.config.extraction.enable_llm:
+            try:
+                self.llm_extractor = LLMExtractor(
+                    self.config.extraction.llm,
+                    prompts_path=self.config.extraction.llm_prompt_template,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "LLM extractor initialization failed; disabling LLM extraction",
+                    error=str(exc),
+                )
+                self.config.extraction.enable_llm = False
+
+        if self.entity_merger is None:
+            self.entity_merger = EntityMerger(
+                allowed_types=self.config.extraction.entity_types,
+                normalizer=self.string_normalizer,
+            )
 
         if self.neo4j_manager is None:
             self.neo4j_manager = Neo4jManager(self.config.database)
-            self.neo4j_manager.connect()
+        neo4j_manager = self.neo4j_manager
+        assert neo4j_manager is not None
+        neo4j_manager.connect()
 
         if self.qdrant_manager is None:
             self.qdrant_manager = QdrantManager(self.config.database)
@@ -136,21 +212,34 @@ class IngestionPipeline:
         parsed_doc: ParsedDocument | None = None
 
         try:
+            # Reset per-document caches
+            self._spacy_entities_by_chunk = {}
+            self._llm_entities_by_chunk = {}
+
             # Initialize components if needed
             self.initialize_components()
 
+            pdf_parser = self.pdf_parser
+            text_cleaner = self.text_cleaner
+            chunker = self.chunker
+            embeddings_generator = self.embeddings
+            neo4j_manager = self.neo4j_manager
+            assert pdf_parser is not None
+            assert text_cleaner is not None
+            assert chunker is not None
+            assert embeddings_generator is not None
+            assert neo4j_manager is not None
+
             # Step 1: Parse PDF
             logger.debug("Step 1: Parsing PDF")
-            parsed_doc = self.pdf_parser.parse_pdf(pdf_path)
+            parsed_doc = pdf_parser.parse_pdf(pdf_path)
 
             if parsed_doc.error:
                 raise Exception(f"PDF parsing failed: {parsed_doc.error}")
 
-            # Resume / cleanup logic (based on deterministic document_id + checksum)
+                # Resume / cleanup logic (based on deterministic document_id + checksum)
             if self.config.pipeline.enable_checkpointing:
-                existing = self.neo4j_manager.get_entity(
-                    parsed_doc.document_id, EntityType.DOCUMENT
-                )
+                existing = neo4j_manager.get_entity(parsed_doc.document_id, EntityType.DOCUMENT)
                 existing_checksum = (existing or {}).get("checksum")
                 existing_status = (existing or {}).get("ingestion_status")
 
@@ -162,7 +251,7 @@ class IngestionPipeline:
                 ):
                     # Already ingested successfully; skip.
                     try:
-                        existing_chunks = self.neo4j_manager.get_chunks_by_document(
+                        existing_chunks = neo4j_manager.get_chunks_by_document(
                             parsed_doc.document_id
                         )
                         chunks_created = len(existing_chunks)
@@ -194,7 +283,7 @@ class IngestionPipeline:
             # Step 2: Clean text
             logger.debug("Step 2: Cleaning text")
             if self.config.ingestion.text_cleaning.enabled:
-                parsed_doc.raw_text = self.text_cleaner.clean(parsed_doc.raw_text)
+                parsed_doc.raw_text = text_cleaner.clean(parsed_doc.raw_text)
 
             # Step 2.5: Optional rewriting (disabled by default)
             if self.config.ingestion.text_rewriting.enabled:
@@ -203,33 +292,116 @@ class IngestionPipeline:
 
             # Step 3: Create chunks
             logger.debug("Step 3: Creating chunks")
-            chunks = self.chunker.chunk_document(parsed_doc)
+            chunks = chunker.chunk_document(parsed_doc)
 
             if not chunks:
                 raise Exception("No chunks created from document")
 
-            # Step 4: Generate embeddings
-            logger.debug("Step 4: Generating embeddings")
+            # Step 3b: Build/update acronym dictionary from chunks (normalization aid)
+            self.stats["acronym_definitions_added"] += self._update_acronym_dictionary(chunks)
+
+            # Step 4: Extract entities with spaCy + LLM (in parallel when possible)
+            logger.debug("Step 4: Extracting entities (spaCy + LLM)")
+            spacy_entities_created = 0
+            llm_entities_created = 0
+            llm_relationships_created = 0
+
+            can_parallelize = (
+                self.spacy_extractor is not None
+                and self.llm_extractor is not None
+                and self.config.extraction.enable_llm
+            )
+            if can_parallelize:
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    spacy_future = executor.submit(self._extract_spacy_entities, chunks)
+                    llm_future = executor.submit(self._extract_llm_entities, chunks)
+                    spacy_entities_created = spacy_future.result()
+                    llm_entities_created = llm_future.result()
+            else:
+                logger.debug("Step 4a: Extracting entities with spaCy")
+                spacy_entities_created = self._extract_spacy_entities(chunks)
+                if self.config.extraction.enable_llm:
+                    if not self.llm_extractor:
+                        logger.warning(
+                            "LLM extraction enabled but extractor not initialized; skipping"
+                        )
+                    else:
+                        logger.debug("Step 4b: Extracting entities with LLM")
+                        llm_entities_created = self._extract_llm_entities(chunks)
+
+            if self.config.extraction.enable_llm and self.llm_extractor:
+                logger.debug("Step 4c: Extracting relationships with LLM")
+                llm_relationships_created = self._extract_llm_relationships(chunks)
+
+            # Step 4d: Merge entities across extractors
+            logger.debug("Step 4d: Merging extracted entities")
+            merged_entities_created = self._merge_entities(chunks)
+            self._enrich_merged_entities_with_acronyms(chunks)
+
+            entities_created = (
+                merged_entities_created
+                if self.entity_merger
+                else spacy_entities_created + llm_entities_created
+            )
+
+            # Step 5: Generate embeddings
+            logger.debug("Step 5: Deduplicating merged entities with embeddings")
+            dedup_suggestions = self._deduplicate_merged_entities(chunks)
+
+            logger.debug("Step 6: Generating embeddings")
             chunk_texts = [chunk.content for chunk in chunks]
-            embeddings = self.embeddings.generate(chunk_texts)
+            embeddings = embeddings_generator.generate(chunk_texts)
 
             if len(embeddings) != len(chunks):
                 raise Exception(
                     f"Embedding count mismatch: {len(embeddings)} embeddings for {len(chunks)} chunks"
                 )
 
-            # Step 5: Store in databases
-            logger.debug("Step 5: Storing in databases")
+            # Step 6: Store in databases
+            logger.debug("Step 7: Storing in databases")
             self._store_document_and_chunks(parsed_doc, chunks, embeddings)
+
+            # Step 7b: Store entity/relationship candidates for curation
+            logger.debug("Step 7b: Storing extraction candidates")
+            entity_candidates_stored = self._store_entity_candidates(chunks)
+            relationship_candidates_stored = self._store_relationship_candidates(chunks)
 
             # Mark document as completed
             self._upsert_document_status(parsed_doc, status="completed")
+
+            # Persist updated acronym mappings (best-effort; don't fail ingestion)
+            if self.acronym_resolver and self.config.normalization.enable_acronym_resolution:
+                try:
+                    self.acronym_resolver.store_mappings()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to store acronym mappings", error=str(exc))
 
             # Update statistics
             processing_time = time.time() - start_time
             self.stats["documents_processed"] += 1
             self.stats["chunks_created"] += len(chunks)
             self.stats["total_processing_time"] += processing_time
+            self.stats["entities_created"] = (
+                self.stats.get("entities_created", 0) + entities_created
+            )
+            self.stats["llm_entities_extracted"] = (
+                self.stats.get("llm_entities_extracted", 0) + llm_entities_created
+            )
+            self.stats["llm_relationships_extracted"] = (
+                self.stats.get("llm_relationships_extracted", 0) + llm_relationships_created
+            )
+            self.stats["merged_entities_created"] = (
+                self.stats.get("merged_entities_created", 0) + merged_entities_created
+            )
+            self.stats["dedup_merge_suggestions"] = (
+                self.stats.get("dedup_merge_suggestions", 0) + dedup_suggestions
+            )
+            self.stats["entity_candidates_stored"] = (
+                self.stats.get("entity_candidates_stored", 0) + entity_candidates_stored
+            )
+            self.stats["relationship_candidates_stored"] = (
+                self.stats.get("relationship_candidates_stored", 0) + relationship_candidates_stored
+            )
 
             logger.success(
                 f"Document processed successfully: {len(chunks)} chunks, {processing_time:.2f}s"
@@ -239,7 +411,7 @@ class IngestionPipeline:
                 document_id=parsed_doc.document_id,
                 success=True,
                 chunks_created=len(chunks),
-                entities_created=0,  # Will be updated when entity extraction is added
+                entities_created=entities_created,
                 processing_time=processing_time,
             )
 
@@ -271,6 +443,166 @@ class IngestionPipeline:
                 processing_time=processing_time,
                 error=str(e),
             )
+
+    def _update_acronym_dictionary(self, chunks: List[Any]) -> int:
+        if not (self.acronym_resolver and self.config.normalization.enable_acronym_resolution):
+            return 0
+        try:
+            return int(self.acronym_resolver.update_dictionary_from_chunks(chunks))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Acronym dictionary update failed", error=str(exc))
+            return 0
+
+    def _enrich_merged_entities_with_acronyms(self, chunks: List[Any]) -> None:
+        """Ensure both acronym and expansion appear in candidate aliases."""
+        if not (self.acronym_resolver and self.config.normalization.enable_acronym_resolution):
+            return
+
+        acronym_re = re.compile(r"\b[A-Z][A-Z0-9&/\-]{1,10}\b")
+
+        for chunk in chunks:
+            metadata = getattr(chunk, "metadata", None) or {}
+            merged = metadata.get("merged_entities") or []
+            if not merged:
+                continue
+
+            context = getattr(chunk, "content", "") or ""
+
+            for candidate in merged:
+                canonical_name = str(candidate.get("canonical_name") or "").strip()
+                alias_list = list(candidate.get("aliases") or [])
+
+                seen: set[str] = set()
+                for value in [canonical_name, *alias_list]:
+                    if value:
+                        seen.add(str(value))
+
+                acronyms: set[str] = set()
+                for value in [canonical_name, *alias_list]:
+                    for match in acronym_re.finditer(str(value or "")):
+                        token = match.group(0)
+                        if len(token) > 1:
+                            acronyms.add(token)
+
+                if not acronyms:
+                    continue
+
+                for acronym in sorted(acronyms):
+                    resolution = self.acronym_resolver.resolve(acronym, context=context)
+                    if not resolution:
+                        continue
+
+                    for alias in resolution.aliases:
+                        if alias and alias not in seen:
+                            alias_list.append(alias)
+                            seen.add(alias)
+
+                    for mention in [canonical_name, *list(candidate.get("aliases") or [])]:
+                        if not mention or acronym not in str(mention):
+                            continue
+                        expanded = str(mention).replace(acronym, resolution.expansion)
+                        if expanded and expanded not in seen:
+                            alias_list.append(expanded)
+                            seen.add(expanded)
+
+                candidate["aliases"] = alias_list
+
+            metadata["merged_entities"] = merged
+            chunk.metadata = metadata
+
+    def _deduplicate_merged_entities(self, chunks: List[Any]) -> int:
+        """Run embedding-based deduplication across merged entity candidates."""
+        if not (self.entity_deduplicator and self.config.normalization.enable_semantic_matching):
+            return 0
+
+        aggregated: Dict[str, Dict[str, Any]] = {}
+        for chunk in chunks:
+            metadata = getattr(chunk, "metadata", {}) or {}
+            merged = metadata.get("merged_entities") or []
+            if not merged:
+                continue
+
+            for candidate in merged:
+                canonical_name = str(candidate.get("canonical_name") or "").strip()
+                if not canonical_name:
+                    continue
+
+                type_label = str(candidate.get("type") or "UNKNOWN").upper()
+                canonical_normalized = str(
+                    candidate.get("canonical_normalized") or canonical_name
+                ).strip()
+                candidate_key = str(
+                    candidate.get("candidate_key")
+                    or self._candidate_key(type_label, canonical_normalized, canonical_name)
+                )
+                candidate["candidate_key"] = candidate_key
+
+                mention_count = int(candidate.get("mention_count") or 1)
+                aliases = [alias for alias in candidate.get("aliases") or [] if alias]
+                description = str(candidate.get("description") or "").strip()
+
+                record = aggregated.get(candidate_key)
+                if record:
+                    record["mention_count"] += mention_count
+                    for alias in aliases:
+                        if alias not in record["aliases"]:
+                            record["aliases"].append(alias)
+                    if not record["description"] and description:
+                        record["description"] = description
+                else:
+                    aggregated[candidate_key] = {
+                        "entity_id": candidate_key,
+                        "name": canonical_name,
+                        "entity_type": type_label,
+                        "description": description,
+                        "aliases": aliases,
+                        "mention_count": max(1, mention_count),
+                    }
+
+        if not aggregated:
+            return 0
+
+        try:
+            records = [EntityRecord(**payload) for payload in aggregated.values()]
+            result = self.entity_deduplicator.deduplicate(records)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Deduplication failed", error=str(exc))
+            return 0
+
+        suggestions_by_key: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for suggestion in result.merge_suggestions:
+            payload = suggestion.model_dump()
+            suggestions_by_key[suggestion.source_id].append(payload)
+            suggestions_by_key[suggestion.target_id].append(payload)
+
+        suggestion_count = len(result.merge_suggestions)
+        if suggestion_count == 0:
+            return 0
+
+        for chunk in chunks:
+            metadata = getattr(chunk, "metadata", {}) or {}
+            merged = metadata.get("merged_entities") or []
+            if not merged:
+                continue
+
+            changed = False
+            for candidate in merged:
+                candidate_key = candidate.get("candidate_key")
+                if candidate_key and candidate_key in suggestions_by_key:
+                    candidate["dedup_suggestions"] = suggestions_by_key[candidate_key]
+                    changed = True
+
+            if changed:
+                metadata["merged_entities"] = merged
+                chunk.metadata = metadata
+
+        logger.info(
+            "Deduplication produced {} merge suggestions across {} clusters",
+            suggestion_count,
+            len(result.clusters),
+        )
+
+        return suggestion_count
 
     def process_batch(self, pdf_paths: List[Path | str]) -> List[IngestionResult]:
         """Process multiple PDF documents.
@@ -315,6 +647,8 @@ class IngestionPipeline:
         if not self.text_rewriter:
             # Enabled in config, but not initialized (shouldn't happen), fail safe.
             self.text_rewriter = TextRewriter(self.config.ingestion.text_rewriting)
+        text_rewriter = self.text_rewriter
+        assert text_rewriter is not None
 
         rewriting_cfg = self.config.ingestion.text_rewriting
         chunk_level = rewriting_cfg.chunk_level
@@ -333,7 +667,7 @@ class IngestionPipeline:
                 if rewriting_cfg.preserve_original:
                     original_sections[key] = section.content
 
-                result = self.text_rewriter.rewrite(
+                result = text_rewriter.rewrite(
                     section.content,
                     metadata={
                         "section_title": getattr(section, "title", ""),
@@ -362,7 +696,7 @@ class IngestionPipeline:
                     if rewriting_cfg.preserve_original:
                         original_subsections[key] = subsection.content
 
-                    result = self.text_rewriter.rewrite(
+                    result = text_rewriter.rewrite(
                         subsection.content,
                         metadata={
                             "subsection_title": getattr(subsection, "title", ""),
@@ -378,7 +712,7 @@ class IngestionPipeline:
 
         # Always rewrite doc-level raw_text too (so L1 chunk matches improved text),
         # but preserve original above when requested.
-        doc_result = self.text_rewriter.rewrite(
+        doc_result = text_rewriter.rewrite(
             parsed_doc.raw_text,
             metadata={
                 "document_title": parsed_doc.metadata.get("title", ""),
@@ -399,6 +733,353 @@ class IngestionPipeline:
             }
         )
 
+    def _extract_spacy_entities(self, chunks: List[Any]) -> int:
+        """Extract entities from chunks using the spaCy extractor."""
+        if not self.spacy_extractor:
+            return 0
+
+        try:
+            by_chunk = self.spacy_extractor.extract_from_chunks(chunks)
+            self._spacy_entities_by_chunk = by_chunk
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("spaCy extraction failed; proceeding without entities", error=str(exc))
+            return 0
+
+        total = 0
+        for chunk in chunks:
+            entities = by_chunk.get(getattr(chunk, "chunk_id", None), [])
+            if not entities:
+                continue
+
+            total += len(entities)
+            chunk.metadata.setdefault("spacy_entities", [])
+
+            for ent in entities:
+                chunk.metadata["spacy_entities"].append(
+                    {
+                        "text": ent.text,
+                        "label": ent.label,
+                        "confidence": ent.confidence,
+                        "start_char": ent.start_char,
+                        "end_char": ent.end_char,
+                        "sentence": ent.sentence,
+                        "context": ent.context,
+                        "source": (ent.metadata or {}).get("source", ent.source),
+                    }
+                )
+
+        return total
+
+    def _extract_llm_entities(self, chunks: List[Any]) -> int:
+        """Extract entities from chunks using the configured LLM extractor."""
+        if not self.llm_extractor:
+            return 0
+
+        total = 0
+        llm_entities_by_chunk: DefaultDict[str | None, List[Any]] = defaultdict(list)
+        for chunk in chunks:
+            metadata = getattr(chunk, "metadata", {}) or {}
+            try:
+                entities = self.llm_extractor.extract_entities(
+                    chunk,
+                    document_context={
+                        "document_title": metadata.get("document_title"),
+                        "section_title": metadata.get("section_title")
+                        or metadata.get("hierarchy_path"),
+                        "page_numbers": metadata.get("page_numbers"),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "LLM entity extraction failed for chunk",
+                    chunk_id=getattr(chunk, "chunk_id", None),
+                    error=str(exc),
+                )
+                continue
+
+            if not entities:
+                continue
+
+            total += len(entities)
+            metadata.setdefault("llm_entities", [])
+            llm_entities_by_chunk[getattr(chunk, "chunk_id", None)].extend(entities)
+
+            for ent in entities:
+                metadata["llm_entities"].append(
+                    {
+                        "name": ent.name,
+                        "type": ent.type,
+                        "description": ent.description,
+                        "aliases": ent.aliases,
+                        "confidence": ent.confidence,
+                        "source": ent.source,
+                        "chunk_id": ent.chunk_id or getattr(chunk, "chunk_id", None),
+                        "document_id": ent.document_id or getattr(chunk, "document_id", None),
+                    }
+                )
+
+            if hasattr(chunk, "metadata"):
+                chunk.metadata = metadata
+
+        self._llm_entities_by_chunk = dict(llm_entities_by_chunk)
+        return total
+
+    def _normalize_candidate_key(self, value: str) -> str:
+        normalized = ""
+        if self.string_normalizer:
+            normalized = self.string_normalizer.normalize(value).normalized
+        if not normalized:
+            normalized = (value or "").strip().lower()
+        return re.sub(r"[^a-zA-Z0-9]+", "_", normalized).strip("_").lower()
+
+    def _candidate_key(self, type_label: str, canonical_normalized: str, fallback: str) -> str:
+        base = canonical_normalized or fallback
+        normalized = self._normalize_candidate_key(base)
+        return f"{type_label}:{normalized}" if normalized else f"{type_label}:{fallback}"
+
+    def _store_entity_candidates(self, chunks: List[Any]) -> int:
+        """Store merged entity candidates in Neo4j for later curation."""
+        neo4j_manager = self.neo4j_manager
+        if not neo4j_manager:
+            return 0
+        if not hasattr(neo4j_manager, "upsert_entity_candidate_aggregate"):
+            return 0
+
+        stored = 0
+        for chunk in chunks:
+            metadata = getattr(chunk, "metadata", {}) or {}
+            merged = metadata.get("merged_entities") or []
+            if not merged:
+                continue
+
+            chunk_id = getattr(chunk, "chunk_id", None)
+            document_id = getattr(chunk, "document_id", None)
+
+            for cand in merged:
+                try:
+                    cand_type = EntityType(str(cand.get("type")))
+                except Exception:  # noqa: BLE001
+                    continue
+
+                canonical_name = str(cand.get("canonical_name") or "").strip()
+                canonical_normalized = str(
+                    cand.get("canonical_normalized") or canonical_name
+                ).strip()
+                if not canonical_name:
+                    continue
+
+                key = str(
+                    cand.get("candidate_key")
+                    or f"{cand_type.value}:{self._normalize_candidate_key(canonical_normalized)}"
+                )
+                event = EntityCandidate.provenance_event(
+                    {
+                        "document_id": document_id,
+                        "chunk_id": chunk_id,
+                        "observed_at": datetime.now().isoformat(),
+                        "provenance": cand.get("provenance") or [],
+                        "confidence": cand.get("confidence"),
+                        "source": "pipeline",
+                    }
+                )
+
+                candidate = EntityCandidate(
+                    id=None,
+                    candidate_key=key,
+                    canonical_name=canonical_name,
+                    candidate_type=cand_type,
+                    aliases=list(cand.get("aliases") or []),
+                    description=str(cand.get("description") or ""),
+                    confidence_score=float(cand.get("confidence") or 0.0),
+                    mention_count=int(cand.get("mention_count") or 1),
+                    source_documents=[document_id] if document_id else [],
+                    chunk_ids=[chunk_id] if chunk_id else [],
+                    conflicting_types=list(cand.get("conflicting_types") or []),
+                    provenance_events=[event],
+                )
+                try:
+                    neo4j_manager.upsert_entity_candidate_aggregate(candidate)
+                    stored += 1
+                    metadata.setdefault("entity_candidate_keys", []).append(key)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to store entity candidate",
+                        chunk_id=chunk_id,
+                        error=str(exc),
+                    )
+
+        return stored
+
+    def _store_relationship_candidates(self, chunks: List[Any]) -> int:
+        """Store relationship candidates in Neo4j for later curation."""
+        neo4j_manager = self.neo4j_manager
+        if not neo4j_manager:
+            return 0
+        if not hasattr(neo4j_manager, "upsert_relationship_candidate_aggregate"):
+            return 0
+
+        stored = 0
+        for chunk in chunks:
+            metadata = getattr(chunk, "metadata", {}) or {}
+            rels = metadata.get("llm_relationships") or []
+            if not rels:
+                continue
+
+            chunk_id = getattr(chunk, "chunk_id", None)
+            document_id = getattr(chunk, "document_id", None)
+
+            for rel in rels:
+                source = str(rel.get("source") or "").strip()
+                target = str(rel.get("target") or "").strip()
+                rel_type = str(rel.get("type") or "").strip()
+                if not (source and target and rel_type):
+                    continue
+
+                key = (
+                    f"{self._normalize_candidate_key(source)}:"
+                    f"{rel_type}:"
+                    f"{self._normalize_candidate_key(target)}"
+                )
+                event = RelationshipCandidate.provenance_event(
+                    {
+                        "document_id": document_id,
+                        "chunk_id": chunk_id,
+                        "observed_at": datetime.now().isoformat(),
+                        "source_extractor": rel.get("source_extractor") or "llm",
+                        "confidence": rel.get("confidence"),
+                        "source": "pipeline",
+                    }
+                )
+
+                candidate = RelationshipCandidate(
+                    id=None,
+                    candidate_key=key,
+                    source=source,
+                    target=target,
+                    type=rel_type,
+                    description=str(rel.get("description") or ""),
+                    confidence_score=float(rel.get("confidence") or 0.0),
+                    mention_count=1,
+                    source_documents=[document_id] if document_id else [],
+                    chunk_ids=[chunk_id] if chunk_id else [],
+                    provenance_events=[event],
+                )
+                try:
+                    neo4j_manager.upsert_relationship_candidate_aggregate(candidate)
+                    stored += 1
+                    metadata.setdefault("relationship_candidate_keys", []).append(key)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to store relationship candidate",
+                        chunk_id=chunk_id,
+                        error=str(exc),
+                    )
+
+        return stored
+
+    def _extract_llm_relationships(self, chunks: List[Any]) -> int:
+        """Extract relationships from chunks using the configured LLM extractor."""
+        if not self.llm_extractor:
+            return 0
+
+        total = 0
+        for chunk in chunks:
+            metadata = getattr(chunk, "metadata", {}) or {}
+            known_entities = []
+            known_entities.extend(metadata.get("llm_entities", []))
+            known_entities.extend(metadata.get("spacy_entities", []))
+
+            try:
+                relationships = self.llm_extractor.extract_relationships(
+                    chunk,
+                    known_entities=known_entities,
+                    document_context={
+                        "document_title": metadata.get("document_title"),
+                        "section_title": metadata.get("section_title")
+                        or metadata.get("hierarchy_path"),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "LLM relationship extraction failed for chunk",
+                    chunk_id=getattr(chunk, "chunk_id", None),
+                    error=str(exc),
+                )
+                continue
+
+            if not relationships:
+                continue
+
+            total += len(relationships)
+            metadata.setdefault("llm_relationships", [])
+
+            for rel in relationships:
+                metadata["llm_relationships"].append(
+                    {
+                        "source": rel.source,
+                        "type": rel.type,
+                        "target": rel.target,
+                        "description": rel.description,
+                        "confidence": rel.confidence,
+                        "bidirectional": rel.bidirectional,
+                        "chunk_id": rel.chunk_id or getattr(chunk, "chunk_id", None),
+                        "document_id": rel.document_id or getattr(chunk, "document_id", None),
+                        "source_extractor": rel.source_extractor,
+                    }
+                )
+
+            if hasattr(chunk, "metadata"):
+                chunk.metadata = metadata
+
+        return total
+
+    def _merge_entities(self, chunks: List[Any]) -> int:
+        """Merge spaCy and LLM entities into unified candidates."""
+        if not self.entity_merger:
+            return 0
+
+        total = 0
+        for chunk in chunks:
+            chunk_id = getattr(chunk, "chunk_id", None)
+            metadata = getattr(chunk, "metadata", None) or {}
+
+            spacy_entities = self._spacy_entities_by_chunk.get(chunk_id, [])
+            llm_entities = self._llm_entities_by_chunk.get(chunk_id, [])
+
+            merged = self.entity_merger.merge(spacy_entities, llm_entities)
+            if not merged:
+                continue
+
+            metadata.setdefault("merged_entities", [])
+            for candidate in merged:
+                candidate_key = self._candidate_key(
+                    candidate.resolved_type,
+                    candidate.canonical_normalized,
+                    candidate.canonical_name,
+                )
+                metadata["merged_entities"].append(
+                    {
+                        "canonical_name": candidate.canonical_name,
+                        "canonical_normalized": candidate.canonical_normalized,
+                        "type": candidate.resolved_type,
+                        "candidate_key": candidate_key,
+                        "confidence": candidate.combined_confidence,
+                        "aliases": candidate.aliases,
+                        "description": candidate.description,
+                        "mention_count": candidate.mention_count,
+                        "conflicting_types": candidate.conflicting_types,
+                        "provenance": [prov.model_dump() for prov in candidate.provenance],
+                    }
+                )
+            if hasattr(chunk, "metadata"):
+                chunk.metadata = metadata
+            else:
+                chunk.metadata = metadata
+
+            total += len(merged)
+
+        return total
+
     def _store_document_and_chunks(
         self,
         parsed_doc: ParsedDocument,
@@ -412,6 +1093,11 @@ class IngestionPipeline:
             chunks: List of chunk objects
             embeddings: List of embedding vectors
         """
+        neo4j_manager = self.neo4j_manager
+        qdrant_manager = self.qdrant_manager
+        assert neo4j_manager is not None
+        assert qdrant_manager is not None
+
         # Upsert document entity (must include canonical_name for base Entity model).
         filename = parsed_doc.metadata.get("filename", "")
         title = parsed_doc.metadata.get("title") or filename or "document"
@@ -436,11 +1122,11 @@ class IngestionPipeline:
         )
 
         # Idempotent document upsert (supports resume/retries)
-        if hasattr(self.neo4j_manager, "upsert_entity"):
-            doc_id = self.neo4j_manager.upsert_entity(document)
+        if hasattr(neo4j_manager, "upsert_entity"):
+            doc_id = neo4j_manager.upsert_entity(document)
         else:
             # Back-compat for tests/fakes that only implement create_entity()
-            doc_id = self.neo4j_manager.create_entity(document)
+            doc_id = neo4j_manager.create_entity(document)
 
         # Prepare chunk data for Qdrant
         chunk_payloads = []
@@ -464,7 +1150,7 @@ class IngestionPipeline:
             chunk_vectors.append(embedding.tolist())  # Convert numpy array to list
 
         # Store chunks in Qdrant
-        self.qdrant_manager.upsert_chunks(chunk_payloads, chunk_vectors)
+        qdrant_manager.upsert_chunks(chunk_payloads, chunk_vectors)
 
         # Store chunks in Neo4j (idempotent per chunk_id; safe for retries)
         for chunk in chunks:
@@ -485,11 +1171,11 @@ class IngestionPipeline:
                 has_figures=chunk.metadata.get("has_figures", False),
                 created_at=datetime.now(),
             )
-            if hasattr(self.neo4j_manager, "upsert_chunk"):
-                self.neo4j_manager.upsert_chunk(graph_chunk)
+            if hasattr(neo4j_manager, "upsert_chunk"):
+                neo4j_manager.upsert_chunk(graph_chunk)
             else:
                 # Back-compat for tests/fakes that only implement create_chunk()
-                self.neo4j_manager.create_chunk(graph_chunk)
+                neo4j_manager.create_chunk(graph_chunk)
 
         logger.debug(f"Stored document {doc_id} with {len(chunks)} chunks")
 
@@ -543,10 +1229,12 @@ class IngestionPipeline:
             checksum=parsed_doc.metadata.get("checksum"),
             properties=props,
         )
-        if hasattr(self.neo4j_manager, "upsert_entity"):
-            self.neo4j_manager.upsert_entity(document)
+        neo4j_manager = self.neo4j_manager
+        assert neo4j_manager is not None
+        if hasattr(neo4j_manager, "upsert_entity"):
+            neo4j_manager.upsert_entity(document)
         else:
-            self.neo4j_manager.create_entity(document)
+            neo4j_manager.create_entity(document)
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get pipeline processing statistics.
@@ -566,7 +1254,7 @@ class IngestionPipeline:
 
         try:
             health["neo4j"] = self.neo4j_manager.health_check() if self.neo4j_manager else False
-        except:
+        except Exception:  # noqa: BLE001
             health["neo4j"] = False
 
         try:
@@ -574,7 +1262,7 @@ class IngestionPipeline:
                 self.qdrant_manager.health_check() if self.qdrant_manager else (False, "")
             )
             health["qdrant"] = qdrant_health
-        except:
+        except Exception:  # noqa: BLE001
             health["qdrant"] = False
 
         # Other components don't have health checks
@@ -596,10 +1284,15 @@ class IngestionPipeline:
 
         logger.info("IngestionPipeline closed")
 
-    def __enter__(self):
+    def __enter__(self) -> "IngestionPipeline":
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Context manager exit."""
         self.close()

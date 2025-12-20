@@ -1,7 +1,36 @@
-{"label": "SYSTEM", "pattern": [{"LOWER": {"IN": ["power", "thermal", "attitude", "communications", "telemetry", "command", "propulsion", "guidance"]}}]}
-{"label": "SUBSYSTEM", "pattern": [{"LOWER": "eps"}]}
-{"label": "SUBSYSTEM", "pattern": [{"TEXT": {"REGEX": "^[A-Z]{2,4}$"}}]}
-{"label": "COMPONENT", "pattern": [{"LOWER": {"IN": ["battery", "sensor", "actuator", "transponder", "antenna", "thruster", "gyroscope", "accelerometer"]}}]}
-{"label": "PARAMETER", "pattern": [{"LOWER": {"IN": ["temperature", "voltage", "current", "pressure", "altitude", "velocity", "orientation"]}}, {"IS_DIGIT": true, "OP": "?"}]}
-{"label": "PROCEDURE", "pattern": [{"LOWER": {"IN": ["startup", "shutdown", "deployment", "calibration", "initialization", "test", "checkout"]}}]}
-{"label": "ANOMALY", "pattern": [{"LOWER": {"IN": ["failure", "fault", "error", "anomaly", "malfunction", "degradation"]}}]}
+{"label":"SYSTEM","pattern":[{"LOWER":{"IN":["power","thermal","attitude","communications"]}}]}
+{"label":"SYSTEM","pattern":[{"LOWER":{"IN":["telemetry","command","propulsion","guidance"]}}]}
+{"label":"SUBSYSTEM","pattern":[{"LOWER":"eps"}]}
+{"label":"SUBSYSTEM","pattern":[{"TEXT":{"REGEX":"^[A-Z]{2,4}$"}}]}
+{"label":"COMPONENT","pattern":[{"LOWER":{"IN":["battery","sensor","actuator","transponder"]}}]}
+{"label":"COMPONENT","pattern":[{"LOWER":{"IN":["antenna","thruster"]}}]}
+{"label":"COMPONENT","pattern":[{"LOWER":{"IN":["gyroscope","accelerometer"]}}]}
+{"label":"PARAMETER","pattern":[{"LOWER":"temperature"},{"IS_DIGIT":true,"OP":"?"}]}
+{"label":"PARAMETER","pattern":[{"LOWER":"voltage"},{"IS_DIGIT":true,"OP":"?"}]}
+{"label":"PARAMETER","pattern":[{"LOWER":{"IN":["current","pressure"]}},{"IS_DIGIT":true,"OP":"?"}]}
+{"label":"PARAMETER","pattern":[{"LOWER":"altitude"},{"IS_DIGIT":true,"OP":"?"}]}
+{"label":"PARAMETER","pattern":[{"LOWER":"velocity"},{"IS_DIGIT":true,"OP":"?"}]}
+{"label":"PARAMETER","pattern":[{"LOWER":"orientation"},{"IS_DIGIT":true,"OP":"?"}]}
+{"label":"PROCEDURE","pattern":[{"LOWER":{"IN":["startup","shutdown","deployment","calibration"]}}]}
+{"label":"PROCEDURE","pattern":[{"LOWER":{"IN":["initialization","test","checkout"]}}]}
+{"label":"ANOMALY","pattern":[{"LOWER":{"IN":["failure","fault","error"]}}]}
+{"label":"ANOMALY","pattern":[{"LOWER":{"IN":["anomaly","malfunction","degradation"]}}]}
+{"label":"SYSTEM","pattern":[{"LOWER":"spacecraft"},{"LOWER":{"IN":["bus","platform"]}}]}
+{"label":"SYSTEM","pattern":[{"LOWER":"payload"},{"LOWER":{"IN":["module","bay"]}}]}
+{"label":"SUBSYSTEM","pattern":[{"LOWER":"power"},{"LOWER":"subsystem"}]}
+{"label":"SUBSYSTEM","pattern":[{"LOWER":"thermal"},{"LOWER":"control"},{"LOWER":"subsystem"}]}
+{"label":"SUBSYSTEM","pattern":[{"LOWER":"communication"},{"LOWER":"subsystem"}]}
+{"label":"SUBSYSTEM","pattern":[{"LOWER":"command"},{"LOWER":"data"},{"LOWER":"handling"}]}
+{"label":"COMPONENT","pattern":[{"LOWER":"reaction"},{"LOWER":"wheel"}]}
+{"label":"COMPONENT","pattern":[{"LOWER":"star"},{"LOWER":"tracker"}]}
+{"label":"COMPONENT","pattern":[{"LOWER":"sun"},{"LOWER":"sensor"}]}
+{"label":"COMPONENT","pattern":[{"LOWER":"magnetorquer"}]}
+{"label":"COMPONENT","pattern":[{"LOWER":"solar"},{"LOWER":"array"},{"LOWER":"drive"}]}
+{"label":"COMPONENT","pattern":[{"LOWER":"onboard"},{"LOWER":"computer"}]}
+{"label":"PARAMETER","pattern":[{"LOWER":"state"},{"LOWER":"of"},{"LOWER":"charge"}]}
+{"label":"PARAMETER","pattern":[{"LOWER":"bus"},{"LOWER":"voltage"}]}
+{"label":"PARAMETER","pattern":[{"LOWER":"angular"},{"LOWER":"rate"}]}
+{"label":"PARAMETER","pattern":[{"LOWER":"propellant"},{"LOWER":"pressure"}]}
+{"label":"PROCEDURE","pattern":[{"LOWER":"safe"},{"LOWER":"mode"},{"LOWER":"entry"}]}
+{"label":"PROCEDURE","pattern":[{"LOWER":"antenna"},{"LOWER":"deployment"}]}
+{"label":"PROCEDURE","pattern":[{"LOWER":"reaction"},{"LOWER":"wheel"},{"LOWER":"desaturation"}]}

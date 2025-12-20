@@ -7,7 +7,7 @@ content like code blocks, equations, and technical terms.
 
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 import yaml
 from loguru import logger

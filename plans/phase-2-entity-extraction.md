@@ -19,7 +19,7 @@ Set up spaCy NER pipeline with domain-specific patterns for satellite terminolog
 
 **Steps:**
 1. Create [`src/extraction/spacy_extractor.py`] with `SpacyExtractor` class
-2. Load transformer-based English model (`en_core_web_trf`)
+2. Load transformer-based English model (`en_core_web_lg`)
 3. Create custom entity patterns for satellite domain
 4. Add custom pipeline component for domain terms
 5. Implement entity extraction from chunks
@@ -42,17 +42,16 @@ Set up spaCy NER pipeline with domain-specific patterns for satellite terminolog
 
 ---
 
-## Task 2.2: LLM Integration (Ollama and OpenAI)
+## Task 2.2: LLM Integration (Anthropic and OpenAI)
 **Priority:** High  
 **Dependencies:** Task 1.1, Task 1.2
 
 **Description:**
-Implement unified LLM integration that works with either Ollama (local) or OpenAI API based on configuration.
+Implement unified LLM integration that works with either Anthropic or OpenAI API based on configuration.
 
 **Steps:**
 1. Create [`src/extraction/llm_extractor.py`] with `LLMExtractor` class
-2. Implement Ollama client integration
-3. Implement OpenAI client integration
+3. Implement OpenAI/Anthropic client integration
 4. Add configuration-based provider selection
 5. Create extraction prompts for entities
 6. Create extraction prompts for relationships
@@ -62,14 +61,14 @@ Implement unified LLM integration that works with either Ollama (local) or OpenA
 10. Add prompt templates in [`config/extraction_prompts.yaml`]
 
 **Deliverables:**
-- [`src/extraction/llm_extractor.py`] with Ollama and OpenAI integration
+- [`src/extraction/llm_extractor.py`] with OpenAI or Anthropic integration
 - [`config/extraction_prompts.yaml`] with prompt templates
 - Structured output parsing for entities/relationships
 - Configuration-based provider selection
 - Error handling and retry logic
 
 **Acceptance Criteria:**
-- Connects to Ollama or OpenAI based on configuration
+- Connects to Anthropic or OpenAI based on configuration
 - Provider switchable via config file
 - Extracts entities with types and descriptions
 - Extracts relationships with source/target/type
@@ -77,7 +76,7 @@ Implement unified LLM integration that works with either Ollama (local) or OpenA
 - Handles timeouts and retries
 - Configurable temperature and max tokens
 - Same interface regardless of provider
-- Average processing time <5 seconds per chunk for Ollama, <2 seconds for OpenAI
+- Average processing time <5 seconds per chunk for Anthropic, <2 seconds for OpenAI
 
 ---
 
@@ -109,7 +108,7 @@ Design and test prompts for accurate entity and relationship extraction from sat
 - Prompts identify correct relationship types
 - Output follows defined JSON schema
 - Few-shot examples improve accuracy
-- Works well with both Ollama and API LLMs
+- Works well with both API LLMs
 - Documented prompt versions and changes
 
 ---
@@ -120,6 +119,11 @@ Design and test prompts for accurate entity and relationship extraction from sat
 
 **Description:**
 Merge entity candidates from spaCy and LLM extractions, resolving conflicts and combining confidence scores.
+
+**Implementation Notes:**
+- Matching is chunk-scoped and based on normalized surface forms plus LLM aliases.
+- Type conflicts are resolved via weighted confidence voting across extractors; non-winning labels are retained as `conflicting_types`.
+- Confidence uses probabilistic OR (`1 - Π(1 - conf_i)`) with a small cross-source confirmation bonus.
 
 **Steps:**
 1. Create [`src/extraction/entity_merger.py`] with merger logic
@@ -202,7 +206,7 @@ Orchestrate the complete extraction pipeline: classify → extract (spaCy + LLM)
 
 **Acceptance Criteria:**
 - Processes all chunks through extraction
-- Uses configured LLM provider (Ollama or OpenAI)
+- Uses configured LLM provider (Anthropic or OpenAI)
 - Merges results from both extractors
 - Stores all candidates with metadata
 - Reports extraction statistics
@@ -215,7 +219,7 @@ Orchestrate the complete extraction pipeline: classify → extract (spaCy + LLM)
 
 **Key Deliverables:**
 - spaCy NER pipeline with domain patterns
-- Flexible LLM integration (Ollama/OpenAI)
+- Flexible LLM integration (Anthropic/OpenAI)
 - Optimized extraction prompts
 - Entity merger combining multiple sources
 - Entity candidate database

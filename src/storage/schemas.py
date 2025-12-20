@@ -1,5 +1,6 @@
 """Pydantic models for Neo4j graph entities and relationships."""
 
+import json
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
@@ -41,6 +42,84 @@ class ExtractionMethod(str, Enum):
     LLM = "llm"
     MANUAL = "manual"
     MERGED = "merged"
+
+
+class CandidateStatus(str, Enum):
+    """Curation status for extraction candidates (pre-entity)."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class EntityCandidate(BaseModel):
+    """Pre-curation entity candidate stored separately from production entities."""
+
+    id: Optional[str] = Field(default=None, description="Candidate identifier (optional)")
+    candidate_key: str = Field(..., description="Deterministic key for aggregation/upserts")
+    canonical_name: str = Field(..., description="Canonical surface form")
+    candidate_type: EntityType = Field(..., description="Proposed entity type")
+    aliases: List[str] = Field(default_factory=list, description="Aliases observed in extraction")
+    description: str = Field(default="", description="Candidate description (best-effort)")
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Candidate confidence")
+    status: CandidateStatus = Field(default=CandidateStatus.PENDING, description="Curation status")
+    mention_count: int = Field(default=0, ge=0, description="Mentions (aggregation-friendly delta)")
+    source_documents: List[str] = Field(default_factory=list, description="Document IDs where seen")
+    chunk_ids: List[str] = Field(default_factory=list, description="Chunk IDs where seen")
+    conflicting_types: List[str] = Field(
+        default_factory=list, description="Alternative types suggested by extractors"
+    )
+    provenance_events: List[str] = Field(
+        default_factory=list,
+        description="JSON-serialized provenance events (stored as list-of-strings in Neo4j)",
+    )
+    first_seen: datetime = Field(default_factory=datetime.now, description="First time seen")
+    last_seen: datetime = Field(default_factory=datetime.now, description="Last time seen")
+
+    def to_neo4j_dict(self) -> Dict[str, Any]:
+        data = self.model_dump()
+        data["candidate_type"] = self.candidate_type.value
+        data["status"] = self.status.value
+        data["first_seen"] = self.first_seen.isoformat()
+        data["last_seen"] = self.last_seen.isoformat()
+        return data
+
+    @staticmethod
+    def provenance_event(payload: Dict[str, Any]) -> str:
+        return json.dumps(payload, sort_keys=True, default=str)
+
+
+class RelationshipCandidate(BaseModel):
+    """Pre-curation relationship candidate stored separately from production relationships."""
+
+    id: Optional[str] = Field(default=None, description="Candidate identifier (optional)")
+    candidate_key: str = Field(..., description="Deterministic key for aggregation/upserts")
+    source: str = Field(..., description="Source entity surface form")
+    target: str = Field(..., description="Target entity surface form")
+    type: str = Field(..., description="Proposed relationship type")
+    description: str = Field(default="", description="Relationship description")
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Candidate confidence")
+    status: CandidateStatus = Field(default=CandidateStatus.PENDING, description="Curation status")
+    mention_count: int = Field(default=0, ge=0, description="Mentions (aggregation-friendly delta)")
+    source_documents: List[str] = Field(default_factory=list, description="Document IDs where seen")
+    chunk_ids: List[str] = Field(default_factory=list, description="Chunk IDs where seen")
+    provenance_events: List[str] = Field(
+        default_factory=list,
+        description="JSON-serialized provenance events (stored as list-of-strings in Neo4j)",
+    )
+    first_seen: datetime = Field(default_factory=datetime.now, description="First time seen")
+    last_seen: datetime = Field(default_factory=datetime.now, description="Last time seen")
+
+    def to_neo4j_dict(self) -> Dict[str, Any]:
+        data = self.model_dump()
+        data["status"] = self.status.value
+        data["first_seen"] = self.first_seen.isoformat()
+        data["last_seen"] = self.last_seen.isoformat()
+        return data
+
+    @staticmethod
+    def provenance_event(payload: Dict[str, Any]) -> str:
+        return json.dumps(payload, sort_keys=True, default=str)
 
 
 class Entity(BaseModel):

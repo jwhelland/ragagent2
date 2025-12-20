@@ -1,0 +1,8 @@
+# Manual acronym overrides. These entries take precedence over corpus-derived mappings.
+# Use either a single string expansion or a list of possible expansions.
+#
+# Examples:
+# EPS: "Electrical Power Subsystem"
+# T&C:
+#   - "Telemetry and Command"
+#   - "Tracking and Control"

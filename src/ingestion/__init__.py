@@ -54,6 +54,6 @@ def __getattr__(name: str) -> Any:
 if TYPE_CHECKING:
     from src.ingestion.chunker import Chunk, HierarchicalChunker
     from src.ingestion.metadata_extractor import MetadataExtractor
-    from src.ingestion.pdf_parser import PDFParser, ParsedDocument
+    from src.ingestion.pdf_parser import ParsedDocument, PDFParser
     from src.ingestion.text_cleaner import TextCleaner
     from src.ingestion.text_rewriter import RewriteResult, TextRewriter

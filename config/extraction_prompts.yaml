@@ -2,53 +2,131 @@
 
 entity_extraction:
   system: |
-    You are an expert at extracting structured information from technical satellite documents.
-    Your task is to identify entities and classify them according to the provided schema.
-    Always extract entities with their full context and descriptions.
+    You are an expert at extracting structured entities from satellite and spacecraft operations
+    documents. Follow the provided schema exactly and keep outputs deterministic. Avoid Markdown,
+    preambles, or explanations. Prefer evidence-backed entities; when nothing qualifies, respond
+    with an object whose "entities" value is an empty list. Normalize entity names to lower_snake_case
+    and keep abbreviations in aliases.
 
   user_template: |
-    Extract all relevant entities from the following text. For each entity, provide:
-    1. Entity name (canonical form)
-    2. Entity type (from: SYSTEM, SUBSYSTEM, COMPONENT, PARAMETER, PROCEDURE, PROCEDURE_STEP, CONCEPT, STANDARD, ANOMALY, TABLE, FIGURE)
-    3. Description
-    4. Any aliases or abbreviations
-    5. Confidence score (0-1)
+    Extract entities from the text using the schema and allowed labels below.
 
-    Text:
+    Entity types (choose only these):
+    - SYSTEM: spacecraft-level or ground system providing mission-wide function
+    - SUBSYSTEM: major platform partition (power, communications, thermal, GNC, payload)
+    - COMPONENT: hardware or software element inside a subsystem
+    - PARAMETER: tunable value, telemetry field, or threshold
+    - PROCEDURE: multi-step operational activity or checklist
+    - PROCEDURE_STEP: individual action within a procedure
+    - CONCEPT: domain concept or physical phenomenon
+    - DOCUMENT: referenced documents, specifications, ICDs, handbooks
+    - STANDARD: published standard or protocol (e.g., CCSDS, ECSS)
+    - ANOMALY: failure mode, issue, or mitigation step
+    - TABLE: table referenced by number or caption
+    - FIGURE: figure referenced by number or caption
+
+    Output JSON schema (apply strictly):
+    - Root object with required key "entities".
+    - "entities": array of entity objects.
+    - Entity object required fields: name (lower_snake_case string), type (enum above),
+      description (concise, evidence-based), confidence (float 0-1).
+    - Optional fields: aliases (unique strings), source_sentence (verbatim supporting text).
+
+    Extraction rules:
+    - Only emit entities supported by the text; do not invent values or fill with "N/A".
+    - Merge abbreviations into aliases; keep canonical name descriptive but concise.
+    - Provide source_sentence when possible by quoting the shortest text that proves the entity.
+    - Prefer domain-relevant entities; ignore generic nouns and units unless called out as parameters.
+
+    Text to analyze:
     {chunk_text}
 
     Document context:
     - Title: {document_title}
     - Section: {section_title}
-    - Page: {page_numbers}
+    - Page(s): {page_numbers}
 
-    Return a JSON array of entities with this structure:
+    Return ONLY compact JSON (no prose or Markdown):
     {{
       "entities": [
         {{
-          "name": "canonical entity name",
-          "type": "ENTITY_TYPE",
-          "description": "detailed description",
-          "aliases": ["alias1", "alias2"],
+          "name": "example_entity",
+          "type": "COMPONENT",
+          "description": "what it is and its role",
+          "aliases": ["short name"],
+          "source_sentence": "quoted evidence from the chunk",
+          "confidence": 0.87
+        }}
+      ]
+    }}
+
+    Few-shot reference:
+    Input: "The Electrical Power Subsystem (EPS) manages battery charging and solar array deployment."
+    Output:
+    {{
+      "entities": [
+        {{
+          "name": "electrical_power_subsystem",
+          "type": "SUBSYSTEM",
+          "description": "Manages power generation, storage, and distribution",
+          "aliases": ["EPS", "power subsystem"],
+          "source_sentence": "The Electrical Power Subsystem (EPS) manages battery charging and solar array deployment.",
           "confidence": 0.95
+        }},
+        {{
+          "name": "solar_array",
+          "type": "COMPONENT",
+          "description": "Array providing solar power for charging and deployment",
+          "aliases": ["solar panel array"],
+          "source_sentence": "manages battery charging and solar array deployment",
+          "confidence": 0.90
         }}
       ]
     }}
 
 relationship_extraction:
   system: |
-    You are an expert at identifying relationships between entities in technical satellite documents.
-    Your task is to extract relationships that represent meaningful connections between entities.
-    Focus on structural, functional, and procedural relationships.
+    You are an expert at identifying relationships between entities in satellite and spacecraft
+    documents. Use the provided schema and keep outputs machine-parsable JSON only. Prefer concise,
+    evidence-backed descriptions; when no relationships are present, respond with an object whose
+    "relationships" value is an empty list.
 
   user_template: |
-    Extract relationships between entities from the following text. For each relationship, provide:
-    1. Source entity
-    2. Relationship type (from: PART_OF, CONTAINS, DEPENDS_ON, CONTROLS, MONITORS, PROVIDES_POWER_TO, SENDS_DATA_TO, REFERENCES, PRECEDES, REQUIRES_CHECK, AFFECTS, IMPLEMENTS, SIMILAR_TO, CAUSED_BY, MITIGATED_BY, REFERENCES_TABLE, REFERENCES_FIGURE, DEFINED_IN_TABLE, SHOWN_IN_FIGURE, CROSS_REFERENCES)
-    3. Target entity
-    4. Description
-    5. Confidence score (0-1)
-    6. Is bidirectional
+    Identify relationships between entities from the text. Use known entities when provided.
+
+    Relationship types (choose only these):
+    - PART_OF: target is a parent of source
+    - CONTAINS: source includes target as a part or module
+    - DEPENDS_ON: source functionally relies on target
+    - CONTROLS: source commands or actuates target
+    - MONITORS: source observes or measures target
+    - PROVIDES_POWER_TO: source supplies electrical power to target
+    - SENDS_DATA_TO: source transmits data/telemetry to target
+    - REFERENCES: source cites or mentions target
+    - PRECEDES: source step occurs before target step
+    - REQUIRES_CHECK: source requires verification of target
+    - AFFECTS: source impacts or changes target state
+    - IMPLEMENTS: source implements or fulfills target standard or requirement
+    - SIMILAR_TO: source is similar to target
+    - CAUSED_BY: source is caused by target
+    - MITIGATED_BY: source is mitigated by target
+    - REFERENCES_TABLE / REFERENCES_FIGURE: source points to a table/figure
+    - DEFINED_IN_TABLE / SHOWN_IN_FIGURE: target defines or shows source
+    - CONTAINS_TABLE / CONTAINS_FIGURE: source section contains the table/figure
+    - CROSS_REFERENCES: mutual references
+
+    Output JSON schema:
+    - Root object with required key "relationships".
+    - "relationships": array of relationship objects.
+    - Relationship required fields: source (string), type (enum above), target (string),
+      description (concise evidence-backed clause), confidence (float 0-1).
+    - Optional fields: bidirectional (boolean), evidence (verbatim supporting text).
+
+    Extraction rules:
+    - Use entity names from the known entity list when they match; otherwise normalize to lower_snake_case.
+    - Avoid duplicate inverse pairs; set bidirectional to true when the text states mutual linkage.
+    - Prefer structural, functional, or procedural relations; ignore vague co-occurrence.
+    - If no valid relationship is present, return an empty list.
 
     Text:
     {chunk_text}
@@ -60,19 +138,140 @@ relationship_extraction:
     - Title: {document_title}
     - Section: {section_title}
 
-    Return a JSON array of relationships:
+    Return ONLY JSON:
     {{
       "relationships": [
         {{
-          "source": "source entity name",
-          "type": "RELATIONSHIP_TYPE",
-          "target": "target entity name",
-          "description": "what this relationship means",
-          "confidence": 0.90,
+          "source": "battery",
+          "type": "DEPENDS_ON",
+          "target": "solar_array",
+          "description": "Battery relies on solar array output for charging",
+          "evidence": "The battery depends on the solar array for charging during daylight passes.",
+          "confidence": 0.92,
           "bidirectional": false
         }}
       ]
     }}
+
+    Few-shot references:
+    1) Text: "The thermal control system monitors temperature sensors located in each subsystem."
+       Output:
+       {{
+         "relationships": [
+           {{
+             "source": "thermal_control_system",
+             "type": "MONITORS",
+             "target": "temperature_sensor",
+             "description": "Thermal control reads temperature sensors for each subsystem",
+             "confidence": 0.90,
+             "bidirectional": false
+           }}
+         ]
+       }}
+    2) Text: "Procedure step 3 requires check of Table 2 before antenna deployment."
+       Output:
+       {{
+         "relationships": [
+           {{
+             "source": "procedure_step_3",
+             "type": "REQUIRES_CHECK",
+             "target": "table_2",
+             "description": "Step 3 must verify Table 2 before deployment",
+             "confidence": 0.88,
+             "bidirectional": false
+           }},
+           {{
+             "source": "procedure_step_3",
+             "type": "REFERENCES_TABLE",
+             "target": "table_2",
+             "description": "Step 3 references Table 2",
+             "confidence": 0.82,
+             "bidirectional": false
+         }}
+        ]
+       }}
+
+output_schemas:
+  entity:
+    type: object
+    required: ["entities"]
+    properties:
+      entities:
+        type: array
+        items:
+          type: object
+          required: ["name", "type", "description", "confidence"]
+          properties:
+            name: {type: string, pattern: "^[a-z0-9_]+$"}
+            type:
+              type: string
+              enum:
+                - SYSTEM
+                - SUBSYSTEM
+                - COMPONENT
+                - PARAMETER
+                - PROCEDURE
+                - PROCEDURE_STEP
+                - CONCEPT
+                - DOCUMENT
+                - STANDARD
+                - ANOMALY
+                - TABLE
+                - FIGURE
+            description: {type: string}
+            aliases:
+              type: array
+              items: {type: string}
+              uniqueItems: true
+            source_sentence: {type: string}
+            confidence:
+              type: number
+              minimum: 0
+              maximum: 1
+  relationship:
+    type: object
+    required: ["relationships"]
+    properties:
+      relationships:
+        type: array
+        items:
+          type: object
+          required: ["source", "type", "target", "description", "confidence"]
+          properties:
+            source: {type: string}
+            type:
+              type: string
+              enum:
+                - PART_OF
+                - CONTAINS
+                - DEPENDS_ON
+                - CONTROLS
+                - MONITORS
+                - PROVIDES_POWER_TO
+                - SENDS_DATA_TO
+                - REFERENCES
+                - PRECEDES
+                - REQUIRES_CHECK
+                - AFFECTS
+                - IMPLEMENTS
+                - SIMILAR_TO
+                - CAUSED_BY
+                - MITIGATED_BY
+                - REFERENCES_TABLE
+                - REFERENCES_FIGURE
+                - DEFINED_IN_TABLE
+                - SHOWN_IN_FIGURE
+                - CONTAINS_TABLE
+                - CONTAINS_FIGURE
+                - CROSS_REFERENCES
+            target: {type: string}
+            description: {type: string}
+            evidence: {type: string}
+            bidirectional: {type: boolean}
+            confidence:
+              type: number
+              minimum: 0
+              maximum: 1
 
 few_shot_examples:
   entity_examples:
@@ -81,7 +280,7 @@ few_shot_examples:
         - name: "electrical_power_subsystem"
           type: "SUBSYSTEM"
           description: "Manages electrical power generation, storage, and distribution"
-          aliases: ["EPS", "Power Subsystem", "Electrical Power System"]
+          aliases: ["EPS", "power subsystem", "electrical power system"]
           confidence: 0.95
         - name: "battery_charging"
           type: "PROCEDURE"
@@ -93,6 +292,23 @@ few_shot_examples:
           description: "Solar panel array for power generation"
           aliases: ["solar panels", "photovoltaic array"]
           confidence: 0.95
+    - text: "Step 3 (Verify Table 2) ensures transponder configuration meets CCSDS uplink standards."
+      entities:
+        - name: "procedure_step_3"
+          type: "PROCEDURE_STEP"
+          description: "Verification step prior to antenna deployment"
+          aliases: ["step 3"]
+          confidence: 0.86
+        - name: "table_2"
+          type: "TABLE"
+          description: "Table referenced for configuration values"
+          aliases: ["table 2"]
+          confidence: 0.84
+        - name: "ccsds_uplink_standard"
+          type: "STANDARD"
+          description: "Referenced CCSDS uplink requirements"
+          aliases: ["CCSDS uplink"]
+          confidence: 0.82
 
   relationship_examples:
     - text: "The battery depends on the solar array for charging during daylight passes."
@@ -103,20 +319,34 @@ few_shot_examples:
           description: "Battery requires solar array output for charging"
           confidence: 0.95
           bidirectional: false
-
-    - text: "The thermal control system monitors temperature sensors located in each subsystem."
+    - text: "The payload controller sends data to the onboard recorder before downlink."
       relationships:
-        - source: "thermal_control_system"
-          type: "MONITORS"
-          target: "temperature_sensors"
-          description: "Thermal system monitors sensor readings"
-          confidence: 0.90
+        - source: "payload_controller"
+          type: "SENDS_DATA_TO"
+          target: "onboard_recorder"
+          description: "Payload controller forwards data to recorder"
+          confidence: 0.91
+          bidirectional: false
+    - text: "Procedure step 3 requires check of Table 2 before antenna deployment."
+      relationships:
+        - source: "procedure_step_3"
+          type: "REQUIRES_CHECK"
+          target: "table_2"
+          description: "Step 3 must verify Table 2 values"
+          confidence: 0.88
+          bidirectional: false
+        - source: "procedure_step_3"
+          type: "REFERENCES_TABLE"
+          target: "table_2"
+          description: "Step 3 references Table 2"
+          confidence: 0.82
           bidirectional: false
 
 table_figure_extraction:
   system: |
-    You are an expert at extracting structured information from tables and figures in technical documents.
-    Your task is to identify tables and figures, extract their metadata, and understand their content.
+    You are an expert at extracting structured information from tables and figures in technical
+    documents. Your task is to identify tables and figures, extract their metadata, and understand
+    their content.
 
   user_template: |
     Extract table and figure information from the following text:
@@ -162,8 +392,8 @@ table_figure_extraction:
 
 cross_reference_extraction:
   patterns:
-    - 'see section (\d+\.?[\d\.]*)'
-    - 'refer to (?:section|chapter|appendix) (\d+\.?[\d\.]*)'
-    - 'as described in (?:section|chapter) (\d+\.?[\d\.]*)'
-    - 'defined in (?:section|chapter|appendix) (\d+\.?[\d\.]*)'
-    - 'see (?:table|figure) (\d+)'
+    - 'see section (\\d+\\.?[\\d\\.]*)'
+    - 'refer to (?:section|chapter|appendix) (\\d+\\.?[\\d\\.]*)'
+    - 'as described in (?:section|chapter) (\\d+\\.?[\\d\\.]*)'
+    - 'defined in (?:section|chapter|appendix) (\\d+\\.?[\\d\\.]*)'
+    - 'see (?:table|figure) (\\d+)'

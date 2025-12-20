@@ -43,8 +43,10 @@ ingestion:
     min_chunk_size: 100
 
 extraction:
+  enable_llm: true
+  llm_prompt_template: "config/extraction_prompts.yaml"
   spacy:
-    model: "en_core_web_trf"
+    model: "en_core_web_lg"
     custom_patterns: "config/entity_patterns.jsonl"
     batch_size: 100
     confidence_threshold: 0.5
@@ -104,6 +106,10 @@ normalization:
   enable_acronym_resolution: true
   enable_fuzzy_matching: true
   enable_semantic_matching: true
+  rules_file: "config/normalization_rules.yaml"
+  acronym_overrides_file: "config/acronym_overrides.yaml"
+  acronym_storage_path: "data/normalization/acronyms.yaml"
+  normalization_table_path: "data/normalization/normalization_table.json"
 
 retrieval:
   vector_search:

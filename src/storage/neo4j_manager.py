@@ -1,18 +1,23 @@
-"""Neo4j graph database manager for entity and relationship storage."""
+"""Neo4j graph database manager for entity, relationship, and candidate storage."""
 
 import logging
+import uuid
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Union
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from neo4j import GraphDatabase, Session
 from neo4j.exceptions import Neo4jError
 
 from src.storage.schemas import (
+    CandidateStatus,
     Chunk,
     Entity,
+    EntityCandidate,
     EntityStatus,
     EntityType,
     Relationship,
+    RelationshipCandidate,
     RelationshipType,
 )
 from src.utils.config import DatabaseConfig
@@ -113,6 +118,33 @@ class Neo4jManager:
                 except Neo4jError as e:
                     logger.warning(f"Could not create constraint for {entity_type}: {e}")
 
+            # Create constraints for candidate nodes
+            try:
+                session.run(
+                    "CREATE CONSTRAINT entity_candidate_id_unique IF NOT EXISTS "
+                    "FOR (c:EntityCandidate) REQUIRE c.id IS UNIQUE"
+                )
+                session.run(
+                    "CREATE CONSTRAINT entity_candidate_key_unique IF NOT EXISTS "
+                    "FOR (c:EntityCandidate) REQUIRE c.candidate_key IS UNIQUE"
+                )
+                logger.info("Created uniqueness constraints for EntityCandidate")
+            except Neo4jError as e:
+                logger.warning(f"Could not create constraints for EntityCandidate: {e}")
+
+            try:
+                session.run(
+                    "CREATE CONSTRAINT relationship_candidate_id_unique IF NOT EXISTS "
+                    "FOR (c:RelationshipCandidate) REQUIRE c.id IS UNIQUE"
+                )
+                session.run(
+                    "CREATE CONSTRAINT relationship_candidate_key_unique IF NOT EXISTS "
+                    "FOR (c:RelationshipCandidate) REQUIRE c.candidate_key IS UNIQUE"
+                )
+                logger.info("Created uniqueness constraints for RelationshipCandidate")
+            except Neo4jError as e:
+                logger.warning(f"Could not create constraints for RelationshipCandidate: {e}")
+
             # Create constraint for Chunk nodes
             try:
                 session.run(
@@ -134,22 +166,51 @@ class Neo4jManager:
                 except Neo4jError as e:
                     logger.warning(f"Could not create canonical_name index for {entity_type}: {e}")
 
-            # Create index on entity_type (for querying across all entity types)
+            # Candidate indexes for common filters
             try:
                 session.run(
-                    "CREATE INDEX entity_type_idx IF NOT EXISTS "
-                    "FOR (n) ON (n.entity_type)"
+                    "CREATE INDEX entity_candidate_type_idx IF NOT EXISTS "
+                    "FOR (c:EntityCandidate) ON (c.candidate_type)"
                 )
-                logger.info("Created entity_type index")
+                session.run(
+                    "CREATE INDEX entity_candidate_status_idx IF NOT EXISTS "
+                    "FOR (c:EntityCandidate) ON (c.status)"
+                )
+                session.run(
+                    "CREATE INDEX entity_candidate_conf_idx IF NOT EXISTS "
+                    "FOR (c:EntityCandidate) ON (c.confidence_score)"
+                )
+                logger.info("Created indexes for EntityCandidate")
             except Neo4jError as e:
-                logger.warning(f"Could not create entity_type index: {e}")
+                logger.warning(f"Could not create EntityCandidate indexes: {e}")
 
-            # Create index on status for filtering
             try:
-                session.run("CREATE INDEX entity_status_idx IF NOT EXISTS " "FOR (n) ON (n.status)")
-                logger.info("Created status index")
+                session.run(
+                    "CREATE INDEX relationship_candidate_type_idx IF NOT EXISTS "
+                    "FOR (c:RelationshipCandidate) ON (c.type)"
+                )
+                session.run(
+                    "CREATE INDEX relationship_candidate_status_idx IF NOT EXISTS "
+                    "FOR (c:RelationshipCandidate) ON (c.status)"
+                )
+                session.run(
+                    "CREATE INDEX relationship_candidate_conf_idx IF NOT EXISTS "
+                    "FOR (c:RelationshipCandidate) ON (c.confidence_score)"
+                )
+                logger.info("Created indexes for RelationshipCandidate")
             except Neo4jError as e:
-                logger.warning(f"Could not create status index: {e}")
+                logger.warning(f"Could not create RelationshipCandidate indexes: {e}")
+
+            # Create indexes on status for filtering (per-label; Neo4j indexes require a label)
+            for entity_type in entity_types:
+                try:
+                    session.run(
+                        f"CREATE INDEX {entity_type.lower()}_status_idx IF NOT EXISTS "
+                        f"FOR (n:{entity_type}) ON (n.status)"
+                    )
+                    logger.info(f"Created status index for {entity_type}")
+                except Neo4jError as e:
+                    logger.warning(f"Could not create status index for {entity_type}: {e}")
 
             # Create full-text search index for entities
             try:
@@ -167,6 +228,29 @@ class Neo4jManager:
             except Neo4jError as e:
                 logger.warning(f"Could not create full-text search index: {e}")
 
+            # Create full-text search index for candidates
+            try:
+                session.run("DROP INDEX entity_candidate_fulltext IF EXISTS")
+                session.run(
+                    "CREATE FULLTEXT INDEX entity_candidate_fulltext IF NOT EXISTS "
+                    "FOR (c:EntityCandidate) "
+                    "ON EACH [c.canonical_name, c.aliases, c.description]"
+                )
+                logger.info("Created full-text search index for EntityCandidate")
+            except Neo4jError as e:
+                logger.warning(f"Could not create EntityCandidate full-text index: {e}")
+
+            try:
+                session.run("DROP INDEX relationship_candidate_fulltext IF EXISTS")
+                session.run(
+                    "CREATE FULLTEXT INDEX relationship_candidate_fulltext IF NOT EXISTS "
+                    "FOR (c:RelationshipCandidate) "
+                    "ON EACH [c.source, c.target, c.description]"
+                )
+                logger.info("Created full-text search index for RelationshipCandidate")
+            except Neo4jError as e:
+                logger.warning(f"Could not create RelationshipCandidate full-text index: {e}")
+
             # Create index on document_id for chunks
             try:
                 session.run(
@@ -176,14 +260,368 @@ class Neo4jManager:
             except Neo4jError as e:
                 logger.warning(f"Could not create document_id index: {e}")
 
-            # Create index on relationship type
-            try:
-                session.run("CREATE INDEX rel_type_idx IF NOT EXISTS " "FOR ()-[r]-() ON (r.type)")
-                logger.info("Created relationship type index")
-            except Neo4jError as e:
-                logger.warning(f"Could not create relationship type index: {e}")
+            # Relationship property indexes require a concrete relationship type in Neo4j.
+            # Since our relationships use the relationship *type* itself (e.g. :DEPENDS_ON),
+            # indexing a `r.type` property isn't needed here.
 
             logger.info("Neo4j schema creation completed")
+
+    @staticmethod
+    def _deterministic_uuid(key: str) -> str:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, key))
+
+    # Candidate Operations
+
+    def upsert_entity_candidate_aggregate(self, candidate: EntityCandidate) -> str:
+        """Upsert an EntityCandidate, aggregating mention counts and seen locations.
+
+        Note:
+            Neo4j node properties cannot store nested structures; provenance is stored as a
+            list of JSON strings in `provenance_events`.
+        """
+        with self.session() as session:
+            now = datetime.now().isoformat()
+            candidate_id = candidate.id or self._deterministic_uuid(
+                f"entity_candidate:{candidate.candidate_key}"
+            )
+
+            props = candidate.to_neo4j_dict()
+            props["id"] = candidate_id
+            props["last_seen"] = now
+
+            query = """
+            MERGE (c:EntityCandidate {candidate_key: $candidate_key})
+            ON CREATE SET c += $props
+            ON MATCH SET
+                c.last_seen = $last_seen,
+                c.mention_count = coalesce(c.mention_count, 0) + $mention_count,
+                c.confidence_score = CASE
+                    WHEN $confidence_score > coalesce(c.confidence_score, 0.0)
+                    THEN $confidence_score
+                    ELSE coalesce(c.confidence_score, 0.0)
+                END
+            WITH c
+            SET c.source_documents = coalesce(c.source_documents, []) +
+                [d IN $source_documents WHERE NOT d IN coalesce(c.source_documents, [])]
+            SET c.chunk_ids = coalesce(c.chunk_ids, []) +
+                [ch IN $chunk_ids WHERE NOT ch IN coalesce(c.chunk_ids, [])]
+            SET c.aliases = coalesce(c.aliases, []) +
+                [a IN $aliases WHERE NOT a IN coalesce(c.aliases, [])]
+            SET c.conflicting_types = coalesce(c.conflicting_types, []) +
+                [t IN $conflicting_types WHERE NOT t IN coalesce(c.conflicting_types, [])]
+            SET c.provenance_events = coalesce(c.provenance_events, []) +
+                [p IN $provenance_events WHERE NOT p IN coalesce(c.provenance_events, [])]
+            RETURN c.id as id
+            """
+            result = session.run(
+                query,
+                candidate_key=candidate.candidate_key,
+                props=props,
+                last_seen=now,
+                mention_count=int(candidate.mention_count),
+                confidence_score=float(candidate.confidence_score),
+                source_documents=list(candidate.source_documents),
+                chunk_ids=list(candidate.chunk_ids),
+                aliases=list(candidate.aliases),
+                conflicting_types=list(candidate.conflicting_types),
+                provenance_events=list(candidate.provenance_events),
+            )
+            return result.single()["id"]
+
+    def get_entity_candidates(
+        self,
+        *,
+        status: Optional[str] = None,
+        candidate_types: Optional[List[EntityType]] = None,
+        min_confidence: Optional[float] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Query EntityCandidate nodes by status/type/confidence."""
+        with self.session() as session:
+            query = """
+            MATCH (c:EntityCandidate)
+            WHERE ($status IS NULL OR c.status = $status)
+            AND ($min_confidence IS NULL OR c.confidence_score >= $min_confidence)
+            AND (
+                $candidate_types IS NULL
+                OR c.candidate_type IN $candidate_types
+            )
+            RETURN c
+            ORDER BY c.confidence_score DESC, c.mention_count DESC
+            SKIP $offset
+            LIMIT $limit
+            """
+            result = session.run(
+                query,
+                status=status,
+                min_confidence=min_confidence,
+                candidate_types=[t.value for t in candidate_types] if candidate_types else None,
+                limit=limit,
+                offset=offset,
+            )
+            return [dict(record["c"]) for record in result]
+
+    def get_entity_candidate_statistics(self) -> Dict[str, Any]:
+        """Compute basic statistics about EntityCandidate nodes."""
+        with self.session() as session:
+            totals = session.run(
+                """
+                MATCH (c:EntityCandidate)
+                RETURN
+                    count(c) as total,
+                    count(CASE WHEN c.status = 'pending' THEN 1 END) as pending,
+                    count(CASE WHEN c.status = 'approved' THEN 1 END) as approved,
+                    count(CASE WHEN c.status = 'rejected' THEN 1 END) as rejected
+                """
+            ).single()
+
+            by_type = session.run(
+                """
+                MATCH (c:EntityCandidate)
+                RETURN c.candidate_type as candidate_type, count(c) as count
+                ORDER BY count DESC
+                """
+            ).data()
+
+            return {"totals": dict(totals), "by_type": by_type}
+
+    def get_entity_candidate(self, query: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single EntityCandidate by id, candidate_key, or canonical_name."""
+        with self.session() as session:
+            result = session.run(
+                """
+                MATCH (c:EntityCandidate)
+                WHERE c.id = $query
+                   OR c.candidate_key = $query
+                   OR toLower(c.canonical_name) = toLower($query)
+                RETURN c
+                LIMIT 1
+                """,
+                {"query": query},
+            ).single()
+
+            return dict(result["c"]) if result else None
+
+    def search_entity_candidates(self, query: str, *, limit: int = 10) -> List[Dict[str, Any]]:
+        """Full-text search EntityCandidate nodes by query string."""
+        with self.session() as session:
+            cypher = """
+            CALL db.index.fulltext.queryNodes('entity_candidate_fulltext', $query)
+            YIELD node, score
+            RETURN node as c, score
+            ORDER BY score DESC
+            LIMIT $limit
+            """
+            result = session.run(cypher, {"query": query, "limit": limit})
+            items: List[Dict[str, Any]] = []
+            for record in result:
+                item = dict(record["c"])
+                item["_score"] = float(record["score"])
+                items.append(item)
+            return items
+
+    def find_entity_candidate_merge_suggestions(
+        self, query: str, *, limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Suggest potentially mergeable EntityCandidates via full-text search."""
+        with self.session() as session:
+            cypher = """
+            CALL db.index.fulltext.queryNodes('entity_candidate_fulltext', $query)
+            YIELD node, score
+            RETURN node as c, score
+            ORDER BY score DESC
+            LIMIT $limit
+            """
+            result = session.run(cypher, {"query": query, "limit": limit})
+            suggestions: List[Dict[str, Any]] = []
+            for record in result:
+                item = dict(record["c"])
+                item["_score"] = float(record["score"])
+                suggestions.append(item)
+            return suggestions
+
+    def update_entity_candidate_status(self, identifier: str, status: CandidateStatus) -> bool:
+        """Update the status of an EntityCandidate by id or candidate_key."""
+        with self.session() as session:
+            result = session.run(
+                """
+                MATCH (c:EntityCandidate)
+                WHERE c.id = $identifier OR c.candidate_key = $identifier
+                SET c.status = $status, c.last_seen = datetime()
+                RETURN c.candidate_key as candidate_key
+                """,
+                identifier=identifier,
+                status=status.value,
+            ).single()
+            return bool(result)
+
+    def update_entity_candidate(self, identifier: str, properties: Dict[str, Any]) -> bool:
+        """Update arbitrary properties for an EntityCandidate."""
+        normalized_props = dict(properties)
+        if "status" in normalized_props and isinstance(normalized_props["status"], CandidateStatus):
+            normalized_props["status"] = normalized_props["status"].value
+        if "candidate_type" in normalized_props and isinstance(
+            normalized_props["candidate_type"], EntityType
+        ):
+            normalized_props["candidate_type"] = normalized_props["candidate_type"].value
+
+        with self.session() as session:
+            result = session.run(
+                """
+                MATCH (c:EntityCandidate)
+                WHERE c.id = $identifier OR c.candidate_key = $identifier
+                SET c += $props
+                RETURN c.candidate_key as candidate_key
+                """,
+                identifier=identifier,
+                props=normalized_props,
+            ).single()
+            return bool(result)
+
+    def get_relationship_candidates_involving_keys(
+        self,
+        keys: List[str],
+        *,
+        status: Optional[str] = "pending",
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """Return RelationshipCandidate nodes where source/target key matches any of the given keys."""
+        if not keys:
+            return []
+        with self.session() as session:
+            result = session.run(
+                """
+                MATCH (c:RelationshipCandidate)
+                WHERE ($status IS NULL OR c.status = $status)
+                  AND any(k IN $keys WHERE c.candidate_key STARTS WITH (k + ':')
+                                   OR c.candidate_key ENDS WITH (':' + k))
+                RETURN c
+                LIMIT $limit
+                """,
+                keys=keys,
+                status=status,
+                limit=limit,
+            )
+            return [dict(record["c"]) for record in result]
+
+    def update_relationship_candidate_status(self, identifier: str, status: CandidateStatus) -> bool:
+        """Update the status of a RelationshipCandidate by id or candidate_key."""
+        with self.session() as session:
+            result = session.run(
+                """
+                MATCH (c:RelationshipCandidate)
+                WHERE c.id = $identifier OR c.candidate_key = $identifier
+                SET c.status = $status, c.last_seen = datetime()
+                RETURN c.candidate_key as candidate_key
+                """,
+                identifier=identifier,
+                status=status.value,
+            ).single()
+            return bool(result)
+
+    def upsert_relationship(self, relationship: Relationship) -> str:
+        """Create or update a relationship (idempotent by relationship.id)."""
+        with self.session() as session:
+            cypher = f"""
+            MATCH (source {{id: $source_id}})
+            MATCH (target {{id: $target_id}})
+            WHERE any(label IN labels(source) WHERE label IN $entity_types)
+              AND any(label IN labels(target) WHERE label IN $entity_types)
+            MERGE (source)-[r:{relationship.type.value} {{id: $rel_id}}]->(target)
+            SET r += $props
+            RETURN r.id as id
+            """
+            record = session.run(
+                cypher,
+                source_id=relationship.source_entity_id,
+                target_id=relationship.target_entity_id,
+                rel_id=relationship.id,
+                props=relationship.to_neo4j_dict(),
+                entity_types=[et.value for et in EntityType],
+            ).single()
+            if not record:
+                raise Neo4jError(
+                    f"Could not upsert relationship: source or target entity not found "
+                    f"({relationship.source_entity_id} -> {relationship.target_entity_id})"
+                )
+            return record["id"]
+
+    def upsert_relationship_candidate_aggregate(self, candidate: RelationshipCandidate) -> str:
+        """Upsert a RelationshipCandidate, aggregating mention counts and seen locations."""
+        with self.session() as session:
+            now = datetime.now().isoformat()
+            candidate_id = candidate.id or self._deterministic_uuid(
+                f"relationship_candidate:{candidate.candidate_key}"
+            )
+
+            props = candidate.to_neo4j_dict()
+            props["id"] = candidate_id
+            props["last_seen"] = now
+
+            query = """
+            MERGE (c:RelationshipCandidate {candidate_key: $candidate_key})
+            ON CREATE SET c += $props
+            ON MATCH SET
+                c.last_seen = $last_seen,
+                c.mention_count = coalesce(c.mention_count, 0) + $mention_count,
+                c.confidence_score = CASE
+                    WHEN $confidence_score > coalesce(c.confidence_score, 0.0)
+                    THEN $confidence_score
+                    ELSE coalesce(c.confidence_score, 0.0)
+                END
+            WITH c
+            SET c.source_documents = coalesce(c.source_documents, []) +
+                [d IN $source_documents WHERE NOT d IN coalesce(c.source_documents, [])]
+            SET c.chunk_ids = coalesce(c.chunk_ids, []) +
+                [ch IN $chunk_ids WHERE NOT ch IN coalesce(c.chunk_ids, [])]
+            SET c.provenance_events = coalesce(c.provenance_events, []) +
+                [p IN $provenance_events WHERE NOT p IN coalesce(c.provenance_events, [])]
+            RETURN c.id as id
+            """
+            result = session.run(
+                query,
+                candidate_key=candidate.candidate_key,
+                props=props,
+                last_seen=now,
+                mention_count=int(candidate.mention_count),
+                confidence_score=float(candidate.confidence_score),
+                source_documents=list(candidate.source_documents),
+                chunk_ids=list(candidate.chunk_ids),
+                provenance_events=list(candidate.provenance_events),
+            )
+            return result.single()["id"]
+
+    def get_relationship_candidates(
+        self,
+        *,
+        status: Optional[str] = None,
+        rel_type: Optional[str] = None,
+        min_confidence: Optional[float] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Query RelationshipCandidate nodes by status/type/confidence."""
+        with self.session() as session:
+            query = """
+            MATCH (c:RelationshipCandidate)
+            WHERE ($status IS NULL OR c.status = $status)
+            AND ($rel_type IS NULL OR c.type = $rel_type)
+            AND ($min_confidence IS NULL OR c.confidence_score >= $min_confidence)
+            RETURN c
+            ORDER BY c.confidence_score DESC, c.mention_count DESC
+            SKIP $offset
+            LIMIT $limit
+            """
+            result = session.run(
+                query,
+                status=status,
+                rel_type=rel_type,
+                min_confidence=min_confidence,
+                limit=limit,
+                offset=offset,
+            )
+            return [dict(record["c"]) for record in result]
 
     def drop_schema(self) -> None:
         """Drop all constraints and indexes (use with caution)."""
@@ -400,7 +838,6 @@ class Neo4jManager:
 
             # Add entity type filter
             if entity_types:
-                type_labels = [et.value for et in entity_types]
                 cypher_query += """
                 WHERE any(label IN labels(node) WHERE label IN $entity_types)
                 """
@@ -423,11 +860,13 @@ class Neo4jManager:
 
             result = session.run(
                 cypher_query,
-                query=query,
-                entity_types=[et.value for et in entity_types] if entity_types else None,
-                all_entity_types=[et.value for et in EntityType],
-                status=status.value if status else None,
-                limit=limit,
+                {
+                    "query": query,
+                    "entity_types": [et.value for et in entity_types] if entity_types else None,
+                    "all_entity_types": [et.value for et in EntityType],
+                    "status": status.value if status else None,
+                    "limit": limit,
+                },
             )
 
             entities = []
@@ -586,7 +1025,7 @@ class Neo4jManager:
             """
 
             if relationship_type:
-                query += f"""
+                query += """
                 WHERE type(r) = $rel_type
                 """
 

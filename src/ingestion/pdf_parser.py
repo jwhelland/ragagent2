@@ -14,6 +14,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.ingestion.metadata_extractor import MetadataExtractor
+from src.utils.lzma_compat import ensure_lzma
 from src.utils.config import PDFParserConfig
 
 
@@ -190,6 +191,9 @@ class PDFParser:
         if self.converter is not None:
             return
 
+        # Some Python builds omit stdlib lzma; ensure a compatible module before importing docling/transformers.
+        ensure_lzma()
+
         # Import Docling only when needed.
         from docling.datamodel.base_models import InputFormat
         from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -237,7 +241,6 @@ class PDFParser:
             current_subsection: Optional[Section] = None
             section_counter = 0
             subsection_counter = 0
-            subsubsection_counter = 0
 
             for item in result.document.iterate_items():
                 item_type = item.label if hasattr(item, "label") else ""
@@ -246,7 +249,6 @@ class PDFParser:
                 if item_type == "title" or item_type == "section_header":
                     section_counter += 1
                     subsection_counter = 0
-                    subsubsection_counter = 0
 
                     # Save previous section
                     if current_section:
@@ -266,7 +268,6 @@ class PDFParser:
                 elif item_type == "subtitle" or item_type == "subsection_header":
                     if current_section:
                         subsection_counter += 1
-                        subsubsection_counter = 0
 
                         current_subsection = Section(
                             level=2,

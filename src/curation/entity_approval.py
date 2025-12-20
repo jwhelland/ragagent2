@@ -1,0 +1,555 @@
+"""Entity curation operations (Tasks 3.7).
+
+Provides approve/merge/reject/edit operations plus undo + audit trail.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Sequence
+
+from loguru import logger
+from pydantic import BaseModel, Field
+
+from src.normalization.normalization_table import (
+    NormalizationEntry,
+    NormalizationMethod,
+    NormalizationRecord,
+    NormalizationTable,
+)
+from src.normalization.string_normalizer import StringNormalizer
+from src.storage.neo4j_manager import Neo4jManager
+from src.storage.schemas import (
+    CandidateStatus,
+    Entity,
+    EntityCandidate,
+    EntityStatus,
+    EntityType,
+    ExtractionMethod,
+    Relationship,
+    RelationshipCandidate,
+    RelationshipProvenance,
+    RelationshipType,
+)
+from src.utils.config import Config
+
+
+class NormalizationCheckpoint(BaseModel):
+    """Track normalization changes for undo."""
+
+    raw_text: str
+    previous_record: NormalizationRecord | None = None
+
+
+class StatusCheckpoint(BaseModel):
+    identifier: str
+    previous_status: CandidateStatus
+
+
+class UndoAction(BaseModel):
+    """Encapsulate undo information for a curation operation."""
+
+    operation: str
+    entity_id: str | None = None
+    candidate_statuses: List[StatusCheckpoint] = Field(default_factory=list)
+    relationship_candidate_statuses: List[StatusCheckpoint] = Field(default_factory=list)
+    normalization_changes: List[NormalizationCheckpoint] = Field(default_factory=list)
+    identifier: str | None = None
+    previous_status: CandidateStatus | None = None
+    previous_values: Dict[str, Any] = Field(default_factory=dict)
+
+    def compact(self) -> Dict[str, Any]:
+        """Return a compact, JSON-friendly representation for audit/logging."""
+        return {
+            "operation": self.operation,
+            "entity_id": self.entity_id,
+            "candidate_statuses": [
+                (c.identifier, c.previous_status.value) for c in self.candidate_statuses
+            ],
+            "relationship_candidate_statuses": [
+                (c.identifier, c.previous_status.value)
+                for c in self.relationship_candidate_statuses
+            ],
+            "normalization_changes": [c.raw_text for c in self.normalization_changes],
+            "identifier": self.identifier,
+        }
+
+
+class UndoStackState(BaseModel):
+    actions: List[UndoAction] = Field(default_factory=list)
+
+
+class CurationAuditTrail:
+    """Simple JSONL audit trail for curation actions."""
+
+    def __init__(self, path: Path, *, enabled: bool = True) -> None:
+        self.path = path
+        self.enabled = enabled
+        if self.enabled:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def record(self, event: str, payload: Dict[str, object]) -> None:
+        """Append an audit entry to disk."""
+        if not self.enabled:
+            return
+
+        entry = {
+            "event": event,
+            "payload": payload,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, sort_keys=True) + "\n")
+
+
+class EntityCurationService:
+    """Orchestrate curation actions on EntityCandidates."""
+
+    def __init__(
+        self,
+        manager: Neo4jManager,
+        normalization_table: NormalizationTable,
+        config: Config | None = None,
+        audit_path: Path | None = None,
+        undo_stack_path: Path | None = None,
+    ) -> None:
+        self.manager = manager
+        self.normalization_table = normalization_table
+        self.config = config or Config()
+        self._undo_stack_path = undo_stack_path or Path("data/curation/undo_stack.json")
+        self._undo_stack = self._load_undo_stack(self._undo_stack_path)
+        self._audit = CurationAuditTrail(
+            audit_path or Path("logs/curation_audit.jsonl"),
+            enabled=self.config.curation.enable_audit_trail,
+        )
+        self._string_normalizer = StringNormalizer(self.config.normalization)
+
+    # Public API -----------------------------------------------------
+    def approve_candidate(
+        self, candidate: EntityCandidate, *, update_normalization: bool = True
+    ) -> str:
+        """Approve a candidate and promote it to a production Entity."""
+        entity = self._entity_from_candidate(candidate, EntityStatus.APPROVED)
+        entity_id = self.manager.upsert_entity(entity)
+
+        identifier = self._candidate_identifier(candidate)
+        previous_status = candidate.status
+        self.manager.update_entity_candidate_status(identifier, CandidateStatus.APPROVED)
+
+        normalization_changes: List[NormalizationCheckpoint] = []
+        if update_normalization:
+            normalization_changes = self._upsert_normalization_entries(
+                entity_id=entity_id,
+                canonical_name=candidate.canonical_name,
+                entity_type=candidate.candidate_type,
+                raw_texts=[candidate.canonical_name, *candidate.aliases],
+                status="approved",
+            )
+
+        relationship_candidate_statuses = self._promote_related_relationship_candidates(
+            raw_mentions=[candidate.canonical_name, *candidate.aliases]
+        )
+
+        self._push_undo(
+            UndoAction(
+                operation="approve_candidate",
+                entity_id=entity_id,
+                candidate_statuses=[
+                    StatusCheckpoint(identifier=identifier, previous_status=previous_status)
+                ],
+                relationship_candidate_statuses=relationship_candidate_statuses,
+                normalization_changes=normalization_changes,
+            )
+        )
+
+        self._record_audit(
+            "approve_candidate",
+            {
+                "candidate_key": candidate.candidate_key,
+                "entity_id": entity_id,
+                "canonical_name": candidate.canonical_name,
+            },
+        )
+        return entity_id
+
+    def reject_candidate(self, candidate: EntityCandidate, reason: str = "") -> None:
+        """Reject a candidate without deleting it."""
+        identifier = self._candidate_identifier(candidate)
+        previous_status = candidate.status
+        self.manager.update_entity_candidate_status(identifier, CandidateStatus.REJECTED)
+
+        self._push_undo(
+            UndoAction(
+                operation="reject_candidate",
+                identifier=identifier,
+                previous_status=previous_status,
+            )
+        )
+        self._record_audit(
+            "reject_candidate",
+            {"candidate_key": candidate.candidate_key, "reason": reason},
+        )
+
+    def edit_candidate(
+        self, candidate: EntityCandidate, updates: Dict[str, object]
+    ) -> EntityCandidate:
+        """Edit candidate properties."""
+        if not updates:
+            return candidate
+
+        allowed_fields = {"canonical_name", "aliases", "description", "candidate_type", "confidence_score"}
+        sanitized = {k: v for k, v in updates.items() if k in allowed_fields}
+        if not sanitized:
+            return candidate
+
+        identifier = self._candidate_identifier(candidate)
+        previous_snapshot = {key: getattr(candidate, key) for key in sanitized}
+        self.manager.update_entity_candidate(identifier, sanitized)
+
+        updated_candidate = candidate.model_copy(update=sanitized)
+
+        self._push_undo(
+            UndoAction(
+                operation="edit_candidate",
+                identifier=identifier,
+                previous_values=previous_snapshot,
+            )
+        )
+        self._record_audit(
+            "edit_candidate",
+            {"candidate_key": candidate.candidate_key, "changes": sanitized},
+        )
+        return updated_candidate
+
+    def merge_candidates(
+        self, primary: EntityCandidate, duplicates: Sequence[EntityCandidate]
+    ) -> str:
+        """Merge multiple candidates into a single approved entity."""
+        if not duplicates:
+            return self.approve_candidate(primary)
+
+        all_candidates = [primary, *duplicates]
+        aggregate_aliases = self._collect_aliases(all_candidates)
+        source_documents = self._collect_unique(all_candidates, "source_documents")
+        chunk_ids = self._collect_unique(all_candidates, "chunk_ids")
+        mention_count = sum(candidate.mention_count for candidate in all_candidates)
+        confidence_score = max(candidate.confidence_score for candidate in all_candidates)
+        description = primary.description or next(
+            (c.description for c in duplicates if c.description), ""
+        )
+
+        entity = Entity(
+            canonical_name=primary.canonical_name,
+            entity_type=primary.candidate_type,
+            aliases=sorted(aggregate_aliases),
+            description=description,
+            confidence_score=confidence_score,
+            extraction_method=ExtractionMethod.MANUAL,
+            status=EntityStatus.APPROVED,
+            mention_count=mention_count,
+            source_documents=source_documents,
+            properties={"chunk_ids": chunk_ids, "merged_candidate_keys": [c.candidate_key for c in all_candidates]},
+        )
+        entity_id = self.manager.upsert_entity(entity)
+
+        previous_statuses = []
+        for candidate in all_candidates:
+            identifier = self._candidate_identifier(candidate)
+            previous_statuses.append(
+                StatusCheckpoint(identifier=identifier, previous_status=candidate.status)
+            )
+            new_status = CandidateStatus.APPROVED if candidate is primary else CandidateStatus.REJECTED
+            self.manager.update_entity_candidate_status(identifier, new_status)
+
+        normalization_changes = self._upsert_normalization_entries(
+            entity_id=entity_id,
+            canonical_name=primary.canonical_name,
+            entity_type=primary.candidate_type,
+            raw_texts=list(aggregate_aliases) + [primary.canonical_name],
+            status="approved",
+        )
+
+        relationship_candidate_statuses = self._promote_related_relationship_candidates(
+            raw_mentions=list(aggregate_aliases) + [primary.canonical_name]
+        )
+
+        self._push_undo(
+            UndoAction(
+                operation="merge_candidates",
+                entity_id=entity_id,
+                candidate_statuses=previous_statuses,
+                relationship_candidate_statuses=relationship_candidate_statuses,
+                normalization_changes=normalization_changes,
+            )
+        )
+
+        self._record_audit(
+            "merge_candidates",
+            {
+                "entity_id": entity_id,
+                "primary": primary.candidate_key,
+                "merged": [c.candidate_key for c in duplicates],
+                "aliases_added": list(aggregate_aliases),
+            },
+        )
+        return entity_id
+
+    def undo_last_operation(self) -> bool:
+        """Undo the most recent curation operation."""
+        if not self._undo_stack:
+            return False
+
+        action = self._undo_stack.pop()
+        self._persist_undo_stack()
+        logger.info("Undoing curation operation {}", action.operation)
+
+        if action.operation in {"approve_candidate", "merge_candidates"}:
+            entity_id = action.entity_id
+            if isinstance(entity_id, str):
+                self.manager.delete_entity(entity_id)
+
+            for checkpoint in action.candidate_statuses:
+                self.manager.update_entity_candidate_status(
+                    checkpoint.identifier, checkpoint.previous_status
+                )
+
+            for checkpoint in action.normalization_changes:
+                if checkpoint.previous_record:
+                    self.normalization_table.restore_record(checkpoint.previous_record)
+                else:
+                    self.normalization_table.remove(checkpoint.raw_text)
+
+            for checkpoint in action.relationship_candidate_statuses:
+                self.manager.update_relationship_candidate_status(
+                    checkpoint.identifier, checkpoint.previous_status
+                )
+
+        elif action.operation == "reject_candidate":
+            identifier = action.identifier
+            previous_status = action.previous_status
+            if isinstance(previous_status, CandidateStatus):
+                self.manager.update_entity_candidate_status(identifier, previous_status)
+
+        elif action.operation == "edit_candidate":
+            identifier = action.identifier
+            previous_values = action.previous_values or {}
+            if isinstance(previous_values, dict):
+                self.manager.update_entity_candidate(identifier, previous_values)
+
+        self._record_audit("undo", {"operation": action.operation})
+        return True
+
+    def undo_checkpoint(self) -> int:
+        """Return a checkpoint marker for the current undo stack."""
+        return len(self._undo_stack)
+
+    def rollback_to_checkpoint(self, checkpoint: int) -> None:
+        """Undo operations until reaching the given checkpoint."""
+        while len(self._undo_stack) > checkpoint:
+            self.undo_last_operation()
+
+    # Helpers --------------------------------------------------------
+    def _entity_from_candidate(
+        self, candidate: EntityCandidate, status: EntityStatus
+    ) -> Entity:
+        return Entity(
+            canonical_name=candidate.canonical_name,
+            entity_type=candidate.candidate_type,
+            aliases=sorted(set(candidate.aliases)),
+            description=candidate.description,
+            confidence_score=candidate.confidence_score,
+            extraction_method=ExtractionMethod.MANUAL,
+            status=status,
+            mention_count=candidate.mention_count,
+            source_documents=list(candidate.source_documents),
+            properties={"candidate_key": candidate.candidate_key, "chunk_ids": candidate.chunk_ids},
+        )
+
+    def _candidate_identifier(self, candidate: EntityCandidate) -> str:
+        return candidate.id or candidate.candidate_key
+
+    def _collect_aliases(self, candidates: Sequence[EntityCandidate]) -> List[str]:
+        aliases = set()
+        for candidate in candidates:
+            aliases.add(candidate.canonical_name)
+            aliases.update(candidate.aliases)
+        return sorted(aliases)
+
+    def _collect_unique(self, candidates: Sequence[EntityCandidate], field: str) -> List[str]:
+        values = []
+        for candidate in candidates:
+            values.extend(getattr(candidate, field, []) or [])
+        return sorted(set(values))
+
+    def _upsert_normalization_entries(
+        self,
+        *,
+        entity_id: str,
+        canonical_name: str,
+        entity_type: EntityType,
+        raw_texts: Iterable[str],
+        status: str,
+    ) -> List[NormalizationCheckpoint]:
+        changes: List[NormalizationCheckpoint] = []
+        seen: set[str] = set()
+        for raw_text in raw_texts:
+            cleaned = (raw_text or "").strip()
+            if not cleaned:
+                continue
+            key = cleaned.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+
+            existing = self.normalization_table.lookup(cleaned)
+            checkpoint = NormalizationCheckpoint(raw_text=cleaned, previous_record=existing)
+            self.normalization_table.upsert(
+                NormalizationEntry(
+                    raw_text=cleaned,
+                    canonical_id=entity_id,
+                    canonical_name=canonical_name,
+                    entity_type=entity_type.value,
+                    method=NormalizationMethod.MANUAL,
+                    confidence=1.0,
+                    status=status,
+                )
+            )
+            changes.append(checkpoint)
+        return changes
+
+    def _push_undo(self, action: UndoAction) -> None:
+        self._undo_stack.append(action)
+        self._persist_undo_stack()
+        self._record_audit("operation_logged", {"undo": action.compact()})
+
+    def _record_audit(self, event: str, payload: Dict[str, object]) -> None:
+        self._audit.record(event, payload)
+
+    def _load_undo_stack(self, path: Path) -> List[UndoAction]:
+        if not path.exists():
+            return []
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            state = UndoStackState.model_validate(payload)
+            return list(state.actions)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to load undo stack from {}: {}", path, exc)
+            return []
+
+    def _persist_undo_stack(self) -> None:
+        self._undo_stack_path.parent.mkdir(parents=True, exist_ok=True)
+        state = UndoStackState(actions=self._undo_stack)
+        self._undo_stack_path.write_text(
+            json.dumps(state.model_dump(mode="json"), indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    def _normalize_candidate_key(self, value: str) -> str:
+        normalized = self._string_normalizer.normalize(value).normalized
+        if not normalized:
+            normalized = (value or "").strip().lower()
+        return re.sub(r"[^a-zA-Z0-9]+", "_", normalized).strip("_").lower()
+
+    def _promote_related_relationship_candidates(
+        self, *, raw_mentions: Sequence[str]
+    ) -> List[StatusCheckpoint]:
+        """Promote RelationshipCandidates to production relationships when both endpoints resolve."""
+        keys = sorted({self._normalize_candidate_key(m) for m in raw_mentions if (m or "").strip()})
+        keys = [k for k in keys if k]
+        if not keys:
+            return []
+
+        rows = self.manager.get_relationship_candidates_involving_keys(keys, status="pending")
+        if not rows:
+            return []
+
+        status_checkpoints: List[StatusCheckpoint] = []
+        promoted = 0
+        for row in rows:
+            try:
+                rc = RelationshipCandidate(**row)
+            except Exception:  # noqa: BLE001
+                continue
+
+            source_record = self.normalization_table.lookup(rc.source)
+            target_record = self.normalization_table.lookup(rc.target)
+            if not (source_record and target_record):
+                continue
+            if source_record.status.lower() != "approved" or target_record.status.lower() != "approved":
+                continue
+            if not (source_record.canonical_id and target_record.canonical_id):
+                continue
+
+            try:
+                rel_type = RelationshipType(str(rc.type))
+            except Exception:  # noqa: BLE001
+                continue
+
+            relationship_id = self._deterministic_uuid(
+                f"relationship:{source_record.canonical_id}:{rel_type.value}:{target_record.canonical_id}"
+            )
+
+            provenance = self._relationship_provenance_from_candidate(rc)
+            relationship = Relationship(
+                id=relationship_id,
+                type=rel_type,
+                source_entity_id=source_record.canonical_id,
+                target_entity_id=target_record.canonical_id,
+                description=rc.description or "",
+                confidence_score=rc.confidence_score,
+                extraction_method=ExtractionMethod.MANUAL,
+                status=EntityStatus.APPROVED,
+                provenance=provenance,
+                properties={"relationship_candidate_key": rc.candidate_key},
+            )
+
+            self.manager.upsert_relationship(relationship)
+            prev_status = rc.status
+            self.manager.update_relationship_candidate_status(
+                rc.id or rc.candidate_key, CandidateStatus.APPROVED
+            )
+            status_checkpoints.append(
+                StatusCheckpoint(identifier=rc.id or rc.candidate_key, previous_status=prev_status)
+            )
+            promoted += 1
+
+        if promoted:
+            self._record_audit("promote_relationship_candidates", {"count": promoted})
+        return status_checkpoints
+
+    def _relationship_provenance_from_candidate(
+        self, candidate: RelationshipCandidate
+    ) -> List[RelationshipProvenance]:
+        provenances: List[RelationshipProvenance] = []
+        for raw in candidate.provenance_events:
+            try:
+                payload = json.loads(raw)
+            except Exception:  # noqa: BLE001
+                continue
+            doc_id = str(payload.get("document_id") or "").strip()
+            if not doc_id:
+                continue
+            chunk_id = payload.get("chunk_id")
+            confidence = float(payload.get("confidence") or candidate.confidence_score or 0.0)
+            provenances.append(
+                RelationshipProvenance(
+                    document_id=doc_id,
+                    chunk_id=str(chunk_id) if chunk_id else None,
+                    confidence_score=confidence,
+                    extracted_text=str(payload.get("extracted_text") or "") or None,
+                )
+            )
+        if provenances:
+            return provenances
+        return [
+            RelationshipProvenance(document_id=doc_id)
+            for doc_id in (candidate.source_documents or [])
+            if doc_id
+        ]
+
+    def _deterministic_uuid(self, key: str) -> str:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, key))

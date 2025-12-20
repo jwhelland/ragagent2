@@ -136,9 +136,10 @@ def main():
                 logger.info(f"  {pdf}")
             return 0
 
-        # Initialize pipeline
+        # Initialize pipeline and components before health check so readiness is accurate
         logger.info("Initializing ingestion pipeline...")
         pipeline = IngestionPipeline(config)
+        pipeline.initialize_components()
 
         # Check component health
         health = pipeline.health_check()

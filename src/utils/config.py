@@ -1,6 +1,5 @@
 """Configuration management using Pydantic for validation."""
 
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Literal
 
@@ -87,7 +86,7 @@ class IngestionConfig(BaseSettings):
 class SpacyConfig(BaseSettings):
     """spaCy NER configuration."""
 
-    model: str = "en_core_web_trf"
+    model: str = "en_core_web_lg"
     custom_patterns: str = "config/entity_patterns.jsonl"
     batch_size: int = 100
     confidence_threshold: float = 0.5
@@ -96,6 +95,8 @@ class SpacyConfig(BaseSettings):
 class ExtractionConfig(BaseSettings):
     """Entity extraction configuration."""
 
+    enable_llm: bool = False
+    llm_prompt_template: str = "config/extraction_prompts.yaml"
     spacy: SpacyConfig = Field(default_factory=SpacyConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     entity_types: List[str] = Field(
@@ -146,12 +147,17 @@ class NormalizationConfig(BaseSettings):
     """Normalization configuration."""
 
     fuzzy_threshold: float = 0.90
+    fuzzy_threshold_overrides: Dict[str, float] = {}
     embedding_similarity_threshold: float = 0.85
     auto_merge_threshold: float = 0.95
     min_mention_count: int = 2
     enable_acronym_resolution: bool = True
     enable_fuzzy_matching: bool = True
     enable_semantic_matching: bool = True
+    rules_file: str = "config/normalization_rules.yaml"
+    acronym_overrides_file: str = "config/acronym_overrides.yaml"
+    acronym_storage_path: str = "data/normalization/acronyms.yaml"
+    normalization_table_path: str = "data/normalization/normalization_table.json"
 
 
 class VectorSearchConfig(BaseSettings):
@@ -255,7 +261,7 @@ class DatabaseConfig(BaseSettings):
 
     # Embedding
     embedding_model: str = Field(default="BAAI/bge-small-en-v1.5")
-    embedding_dimension: int = Field(default=768)
+    embedding_dimension: int = Field(default=384)
     embedding_batch_size: int = Field(default=32)
 
 
@@ -301,11 +307,7 @@ class Config(BaseSettings):
         """
         merged: Dict[str, Any] = dict(base)
         for key, value in overrides.items():
-            if (
-                key in merged
-                and isinstance(merged[key], dict)
-                and isinstance(value, dict)
-            ):
+            if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
                 merged[key] = Config._deep_merge_dict(merged[key], value)
             else:
                 merged[key] = value
@@ -351,7 +353,9 @@ class Config(BaseSettings):
         db_env_overrides = DatabaseConfig().model_dump(exclude_defaults=True)
         if db_env_overrides:
             env_overrides["database"] = cls._deep_merge_dict(
-                yaml_config.get("database", {}) if isinstance(yaml_config.get("database", {}), dict) else {},
+                yaml_config.get("database", {})
+                if isinstance(yaml_config.get("database", {}), dict)
+                else {},
                 db_env_overrides,
             )
 
@@ -366,7 +370,12 @@ class Config(BaseSettings):
             ValueError: If configuration is invalid
         """
         # Validate paths exist or can be created
-        for path_name in ["raw_data_path", "processed_data_path", "entities_data_path", "normalization_data_path"]:
+        for path_name in [
+            "raw_data_path",
+            "processed_data_path",
+            "entities_data_path",
+            "normalization_data_path",
+        ]:
             path = getattr(self, path_name)
             path.mkdir(parents=True, exist_ok=True)
 
@@ -379,7 +388,7 @@ class Config(BaseSettings):
 
         # Validate embedding dimension matches model
         valid_dimensions = {
-            "BAAI/bge-small-en-v1.5": 768,
+            "BAAI/bge-small-en-v1.5": 384,
             "BAAI/bge-base-en-v1.5": 768,
             "BAAI/bge-large-en-v1.5": 1024,
         }
@@ -407,9 +416,7 @@ def get_config() -> Config:
     """
     global _config
     if _config is None:
-        raise RuntimeError(
-            "Configuration not initialized. Call load_config() first."
-        )
+        raise RuntimeError("Configuration not initialized. Call load_config() first.")
     return _config
 
 

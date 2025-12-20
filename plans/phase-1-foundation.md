@@ -32,7 +32,7 @@ Set up the complete development environment including databases, LLM infrastruct
 
 **Steps:**
 1. Create Docker Compose configuration for Neo4j and Qdrant
-2. (Skip as already installed) Install and configure Ollama with Llama 3.1 model
+2. (Skip as already installed) Install and configure Anthropic with Llama 3.1 model
 3. Set up Python virtual environment with required dependencies
 4. Create project directory structure as specified in architecture
 5. Initialize Git repository with appropriate `.gitignore`
@@ -48,7 +48,7 @@ Set up the complete development environment including databases, LLM infrastruct
 **Acceptance Criteria:**
 - Neo4j accessible at localhost:7474 with authentication
 - Qdrant accessible at localhost:6333
-- Ollama running and responding to test prompts
+- Anthropic running and responding to test prompts
 - All dependencies installable via pip
 - Project structure matches architecture document
 

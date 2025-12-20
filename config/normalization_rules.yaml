@@ -1,0 +1,44 @@
+lowercase: true
+unicode_form: "NFKC"
+collapse_whitespace: true
+preserve_case_terms:
+  - "C++"
+  - "C#"
+  - "GPU"
+  - "CPU"
+  - "FPGA"
+  - "LiDAR"
+  - "NASA"
+preserve_case_patterns:
+  - "\\b[A-Z]{2,}\\b"
+  - "\\b[A-Z]\\d{1,}\\b"
+  - "\\bC\\+\\+\\b"
+punctuation_replacements:
+  "“": "\""
+  "”": "\""
+  "‘": "'"
+  "’": "'"
+  "–": "-"
+  "—": "-"
+  "−": "-"
+  "·": "-"
+  "•": "-"
+  "…": "..."
+  "×": "x"
+strip_characters:
+  - "\u200b"
+  - "\ufeff"
+keep_symbols:
+  - "+"
+  - "#"
+  - "-"
+  - "/"
+  - "_"
+  - "."
+  - ":"
+  - "'"
+tighten_around_symbols:
+  - "+"
+  - "#"
+  - "/"
+  - "-"

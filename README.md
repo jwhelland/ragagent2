@@ -6,7 +6,7 @@ A comprehensive Graph RAG (Retrieval-Augmented Generation) system designed to pr
 
 - **PDF Ingestion**: Parse PDFs using Docling with OCR support
 - **Hierarchical Chunking**: Multi-level document representation (document → section → subsection → paragraph)
-- **Entity Extraction**: Dual extraction using spaCy NER + LLM (Ollama or OpenAI)
+- **Entity Extraction**: Dual extraction using spaCy NER + LLM (Anthropic or OpenAI)
 - **Knowledge Graph**: Neo4j graph database for entities and relationships
 - **Vector Search**: Qdrant vector database for semantic search
 - **Hybrid Retrieval**: Combined vector and graph search strategies
@@ -31,7 +31,7 @@ The system is built in 6 phases:
 - **Qdrant** - Vector database
 - **Docling** - PDF parsing with OCR
 - **spaCy** - NLP and NER
-- **Ollama/OpenAI** - LLM integration (configurable)
+- **Anthropic/OpenAI** - LLM integration (configurable)
 - **FastEmbed/Sentence Transformers** - Embeddings
 - **Pydantic** - Configuration and validation
 - **Typer** - CLI interface
@@ -40,7 +40,7 @@ The system is built in 6 phases:
 
 - Python 3.12.1 or higher
 - Docker and Docker Compose (for Neo4j and Qdrant)
-- Ollama (optional, for local LLM) or OpenAI API key
+- Anthropic (optional, for local LLM) or OpenAI API key
 
 ## Installation
 
@@ -55,14 +55,10 @@ cd ragagent2
 
 ```bash
 # Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install dependencies
-pip install -e .
+uv sync
 
 # Install spaCy transformer model
-python -m spacy download en_core_web_trf
+uv run spacy download en_core_web_lg
 ```
 
 ### 3. Start Infrastructure Services
@@ -105,7 +101,10 @@ export OPENAI_API_KEY=sk-...
 
 ```bash
 # Initialize Neo4j schema and Qdrant collections
-python scripts/setup_databases.py
+uv run ragagent-setup
+
+# Recreate Qdrant collections after embedding/model changes
+uv run ragagent-setup --recreate-qdrant
 ```
 
 ## Configuration
@@ -139,61 +138,66 @@ Configuration is managed through:
 
 ## Usage
 
+All CLI helpers live in `scripts/` and are exposed as console commands. Run them with `uv run …`
+so dependencies and environment are consistent.
+
+### Setup Databases (Neo4j + Qdrant)
+
+```bash
+# Create constraints/indexes and collections
+uv run ragagent-setup
+
+# Recreate Qdrant collections after embedding/model changes
+uv run ragagent-setup --recreate-qdrant
+```
+
 ### Ingest Documents
 
 ```bash
-# Ingest PDFs from data/raw directory
-ragagent-ingest --input data/raw/ --batch-size 10
+# Ingest every PDF under data/raw (recursive)
+uv run ragagent-ingest --directory data/raw --batch-size 2
 
-# Or use the script directly
-python scripts/ingest_documents.py --input data/raw/ --batch-size 10
+# Ingest explicit files with a specific config and verbose logging
+uv run ragagent-ingest docs/file1.pdf docs/file2.pdf -c config/config.yaml --verbose
+
+# See what would be processed without running the pipeline
+uv run ragagent-ingest --directory data/raw --dry-run
 ```
+
+Key flags: `--directory` (or pass paths), `--batch-size`, `--config`, `--verbose`, `--dry-run`.
 
 ### Run Entity Discovery
 
 ```bash
-# Analyze corpus and generate entity candidates
-ragagent-discover --confidence-threshold 0.7
+# Generate a discovery report with confidence filtering
+uv run ragagent-discover --min-confidence 0.7 --max-candidates 500
 
-# Generate discovery report
-ragagent-discover --generate-report
+# Limit to certain statuses/types and skip visualization
+uv run ragagent-discover --status approved --status pending --candidate-type SYSTEM --no-viz
+
+# Enable semantic merge suggestions (requires embedding model)
+uv run ragagent-discover --enable-semantic-merge --max-merge-suggestions 50
 ```
+
+Useful flags: `--output-dir`, `--status` (repeatable), `--candidate-type` (repeatable),
+`--min-cooccurrence`, `--max-edges`, `--max-clusters`, `--verbose`.
 
 ### Review and Curate Entities
 
 ```bash
-# Launch interactive review interface
-ragagent-review
-
-# Review specific entity type
-ragagent-review --entity-type SYSTEM
-
-# Batch approve high-confidence entities
-ragagent-review --auto-approve --threshold 0.95
+uv run ragagent-review
 ```
 
-### Query the System
+Launches the Typer-based review CLI. Common workflow:
+- Browse candidates: `uv run ragagent-review queue --status pending --entity-type SYSTEM --limit 30`
+- Inspect details: `uv run ragagent-review show "<name or id>"`
+- Approve/reject one: `uv run ragagent-review approve "<id>"` or `... reject "<id>"`
+- Fix metadata: `uv run ragagent-review edit "<id>" --name "New Name" --type SYSTEM --confidence 0.92`
+- Merge duplicates: `uv run ragagent-review merge "<source-id>" "<target-id>"`
+- Batch approve: `uv run ragagent-review batch-approve --min-confidence 0.9 --dry-run --preview-limit 10`
+- Normalization table tools: `uv run ragagent-review normalization queue`, `... normalization show "<canonical>"`, `... normalization search "<term>"`, `... normalization stats`
 
-```bash
-# Interactive query interface
-ragagent-query
-
-# Single query
-ragagent-query "What procedures must be followed before deploying the solar array?"
-
-# Export results
-ragagent-query "Show power subsystem dependencies" --export results.json
-```
-
-### Update Documents
-
-```bash
-# Process document updates
-ragagent-update --input data/raw/
-
-# Dry run to see what would change
-ragagent-update --input data/raw/ --dry-run
-```
+Flags you may need: `--config` to point at a different config file, `--table-path` for an alternate normalization table, `--verbose` via env `RICH_COLOR_SYSTEM=standard` if your terminal needs it.
 
 ## Project Structure
 

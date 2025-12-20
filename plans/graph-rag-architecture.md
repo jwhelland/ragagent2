@@ -5,7 +5,7 @@
 This document outlines the architecture for a graph-based Retrieval-Augmented Generation (RAG) system designed to process 100-500 satellite technical documents and standard operating procedures. The system combines vector similarity search with knowledge graph traversal to enable complex queries across technical documentation.
 
 **Key Design Principles:**
-- Configurable LLM: Use Ollama (local) or OpenAI API based on configuration
+- Configurable LLM: Use Anthropic (local) or OpenAI API based on configuration
 - Incremental updates: Handle document modifications without full reprocessing
 - Entity discovery: Automated extraction with manual curation workflow
 - Hierarchical structure: Multi-level document representation for flexible querying
@@ -24,7 +24,7 @@ graph TB
     
     subgraph "Processing Layer"
         CHUNK --> NER[spaCy NER<br/>Initial Extraction]
-        CHUNK --> LLM[LLM Extractor<br/>Ollama or OpenAI]
+        CHUNK --> LLM[LLM Extractor<br/>Anthropic or OpenAI]
         NER --> MERGE[Entity Merger]
         LLM --> MERGE
         MERGE --> NORM[Normalization<br/>Engine]
@@ -150,7 +150,7 @@ Rewrite the following technical text to be clear and concise while:
 **Configuration:**
 - Optional step (disabled by default due to cost/time)
 - Configurable chunk size for rewriting
-- Uses configured LLM (Ollama or OpenAI)
+- Uses configured LLM (Anthropic or OpenAI)
 - Can be applied selectively to specific documents
 - Tracks original and rewritten versions for comparison
 
@@ -206,16 +206,16 @@ Rewritten text that is more concise and readable while preserving all critical i
 - Confidence scoring based on context
 
 **Stage 2: LLM-Enhanced Extraction**
-- **Configurable LLM:** Use either Ollama (local) or OpenAI API based on configuration
+- **Configurable LLM:** Use either Anthropic (local) or OpenAI API based on configuration
 - Structured output format for entities and relationships
 - Prompt engineering for satellite domain
-- Same interface regardless of backend (Ollama or OpenAI)
+- Same interface regardless of backend (Anthropic or OpenAI)
 
 **Extraction Flow:**
 ```mermaid
 graph LR
     CHUNK[Chunk] --> SPACY[spaCy NER]
-    CHUNK --> LLM[LLM Extractor<br/>Ollama or OpenAI]
+    CHUNK --> LLM[LLM Extractor<br/>Anthropic or OpenAI]
     SPACY --> MERGE[Merge Results]
     LLM --> MERGE
     MERGE --> VALID[Validation]
@@ -781,7 +781,7 @@ ragagent2/
 │   │   └── metadata_extractor.py
 │   ├── extraction/
 │   │   ├── spacy_extractor.py   # spaCy NER extraction
-│   │   ├── llm_extractor.py     # LLM-based extraction (Ollama or OpenAI)
+│   │   ├── llm_extractor.py     # LLM-based extraction (Anthropic or OpenAI)
 │   │   └── entity_merger.py
 │   ├── normalization/
 │   │   ├── string_normalizer.py
@@ -848,7 +848,7 @@ ragagent2/
 **Goal:** Set up core infrastructure and basic ingestion
 
 **Tasks:**
-1. Set up development environment (Neo4j, Qdrant, Ollama)
+1. Set up development environment (Neo4j, Qdrant, Anthropic)
 2. Implement PDF parsing with Docling
 3. Implement text cleaning and preprocessing
 4. Implement optional LLM text rewriting
@@ -866,7 +866,7 @@ ragagent2/
 
 **Tasks:**
 1. Implement spaCy NER pipeline with custom patterns
-2. Set up LLM integration (Ollama or OpenAI based on configuration)
+2. Set up LLM integration (Anthropic or OpenAI based on configuration)
 3. Create LLM extraction prompts for entities/relationships
 4. Implement entity merger (combine spaCy + LLM results)
 5. Build entity candidate database
@@ -1011,7 +1011,7 @@ ingestion:
 
 extraction:
   spacy:
-    model: en_core_web_trf
+    model: en_core_web_lg
     custom_patterns: config/entity_patterns.jsonl
   
   llm:
