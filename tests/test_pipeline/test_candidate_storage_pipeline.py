@@ -98,4 +98,3 @@ def test_store_relationship_candidates_from_llm_relationships() -> None:
     assert rel.type == "DEPENDS_ON"
     assert rel.source_documents == ["doc-2"]
     assert rel.chunk_ids == ["c2"]
-

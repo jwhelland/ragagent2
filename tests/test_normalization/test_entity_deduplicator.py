@@ -56,9 +56,14 @@ def test_clusters_similar_entities_and_ranks_merge_candidates() -> None:
 
 def test_type_mismatch_blocks_auto_merge() -> None:
     entities = [
-        EntityRecord(entity_id="comms-1", name="Comms Module", entity_type="SYSTEM", mention_count=3),
         EntityRecord(
-            entity_id="comms-2", name="Communications Payload", entity_type="COMPONENT", mention_count=2
+            entity_id="comms-1", name="Comms Module", entity_type="SYSTEM", mention_count=3
+        ),
+        EntityRecord(
+            entity_id="comms-2",
+            name="Communications Payload",
+            entity_type="COMPONENT",
+            mention_count=2,
         ),
     ]
     embedder = _StubEmbedder([[1.0, 0.0], [1.0, 0.01]])

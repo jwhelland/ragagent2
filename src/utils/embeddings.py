@@ -31,7 +31,7 @@ class EmbeddingGenerator:
         self,
         config: Optional[DatabaseConfig] = None,
         cache_dir: Optional[Path] = None,
-        use_cache: bool = True
+        use_cache: bool = True,
     ) -> None:
         """Initialize the embedding generator.
 
@@ -54,7 +54,7 @@ class EmbeddingGenerator:
             logger.info(f"Loading embedding model: {self.config.embedding_model}")
             self.model = TextEmbedding(
                 model_name=self.config.embedding_model,
-                cache_dir=str(cache_dir) if cache_dir else None
+                cache_dir=str(cache_dir) if cache_dir else None,
             )
             logger.success(
                 f"Loaded {self.config.embedding_model} "
@@ -85,10 +85,7 @@ class EmbeddingGenerator:
         return max_lengths.get(self.config.embedding_model, 512)
 
     def generate(
-        self,
-        texts: List[str],
-        batch_size: Optional[int] = None,
-        show_progress: bool = False
+        self, texts: List[str], batch_size: Optional[int] = None, show_progress: bool = False
     ) -> List[np.ndarray]:
         """Generate embeddings for a list of texts.
 
@@ -124,16 +121,11 @@ class EmbeddingGenerator:
         # Generate embeddings for uncached texts
         if texts_to_embed:
             # Truncate long texts
-            truncated_texts = [
-                self._truncate_text(text) for _, text in texts_to_embed
-            ]
+            truncated_texts = [self._truncate_text(text) for _, text in texts_to_embed]
 
             # Generate embeddings in batches
             try:
-                generated = list(self.model.embed(
-                    truncated_texts,
-                    batch_size=batch_size
-                ))
+                generated = list(self.model.embed(truncated_texts, batch_size=batch_size))
 
                 # Store in cache and result list
                 for (i, original_text), embedding in zip(texts_to_embed, generated):
@@ -190,7 +182,7 @@ class EmbeddingGenerator:
             return text
 
         # Truncate and add ellipsis
-        truncated = text[:max_chars].rsplit(' ', 1)[0]  # Break at word boundary
+        truncated = text[:max_chars].rsplit(" ", 1)[0]  # Break at word boundary
         logger.debug(f"Truncated text from {len(text)} to {len(truncated)} chars")
 
         return truncated + "..."
@@ -207,9 +199,7 @@ class EmbeddingGenerator:
         return hashlib.md5(text.encode()).hexdigest()
 
     def batch_generate(
-        self,
-        texts: List[str],
-        batch_size: Optional[int] = None
+        self, texts: List[str], batch_size: Optional[int] = None
     ) -> List[np.ndarray]:
         """Generate embeddings in batches (alias for generate).
 
@@ -279,11 +269,7 @@ class EmbeddingGenerator:
         """
         return [self.normalize_embedding(e) for e in embeddings]
 
-    def cosine_similarity(
-        self,
-        embedding1: np.ndarray,
-        embedding2: np.ndarray
-    ) -> float:
+    def cosine_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
         """Calculate cosine similarity between two embeddings.
 
         Args:
@@ -303,9 +289,7 @@ class EmbeddingGenerator:
         return np.dot(embedding1, embedding2) / (norm1 * norm2)
 
     def batch_cosine_similarity(
-        self,
-        query_embedding: np.ndarray,
-        embeddings: List[np.ndarray]
+        self, query_embedding: np.ndarray, embeddings: List[np.ndarray]
     ) -> List[float]:
         """Calculate cosine similarity between query and multiple embeddings.
 
@@ -316,10 +300,7 @@ class EmbeddingGenerator:
         Returns:
             List of cosine similarity scores
         """
-        return [
-            self.cosine_similarity(query_embedding, e)
-            for e in embeddings
-        ]
+        return [self.cosine_similarity(query_embedding, e) for e in embeddings]
 
     def save_cache(self, cache_path: Path) -> None:
         """Save embedding cache to disk.
@@ -336,7 +317,7 @@ class EmbeddingGenerator:
             np.savez_compressed(
                 cache_path,
                 keys=list(self._cache.keys()),
-                embeddings=[self._cache[k] for k in self._cache.keys()]
+                embeddings=[self._cache[k] for k in self._cache.keys()],
             )
             logger.info(f"Saved {len(self._cache)} embeddings to cache: {cache_path}")
         except Exception as e:
@@ -357,10 +338,7 @@ class EmbeddingGenerator:
             keys = data["keys"]
             embeddings = data["embeddings"]
 
-            self._cache = {
-                key: embedding
-                for key, embedding in zip(keys, embeddings)
-            }
+            self._cache = {key: embedding for key, embedding in zip(keys, embeddings)}
 
             logger.info(f"Loaded {len(self._cache)} embeddings from cache: {cache_path}")
         except Exception as e:
@@ -383,9 +361,7 @@ class SentenceTransformerEmbedding:
     """
 
     def __init__(
-        self,
-        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
-        device: str = "cpu"
+        self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2", device: str = "cpu"
     ) -> None:
         """Initialize Sentence Transformers embedding generator.
 
@@ -419,10 +395,7 @@ class SentenceTransformerEmbedding:
             List of embedding vectors
         """
         embeddings = self.model.encode(
-            texts,
-            batch_size=batch_size,
-            show_progress_bar=False,
-            convert_to_numpy=True
+            texts, batch_size=batch_size, show_progress_bar=False, convert_to_numpy=True
         )
 
         return [np.array(e, dtype=np.float32) for e in embeddings]

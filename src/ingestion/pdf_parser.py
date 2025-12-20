@@ -14,8 +14,8 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.ingestion.metadata_extractor import MetadataExtractor
-from src.utils.lzma_compat import ensure_lzma
 from src.utils.config import PDFParserConfig
+from src.utils.lzma_compat import ensure_lzma
 
 
 class TableData(BaseModel):
@@ -273,12 +273,12 @@ class PDFParser:
                             level=2,
                             title=item.text if hasattr(item, "text") else "",
                             content="",
-                            start_page=item.prov[0].page
-                            if hasattr(item, "prov") and item.prov
-                            else 1,
-                            end_page=item.prov[0].page
-                            if hasattr(item, "prov") and item.prov
-                            else 1,
+                            start_page=(
+                                item.prov[0].page if hasattr(item, "prov") and item.prov else 1
+                            ),
+                            end_page=(
+                                item.prov[0].page if hasattr(item, "prov") and item.prov else 1
+                            ),
                             hierarchy_path=f"{section_counter}.{subsection_counter}",
                         )
 

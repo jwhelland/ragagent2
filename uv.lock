@@ -3371,6 +3371,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
+    { name = "black" },
     { name = "docling" },
     { name = "en-core-web-lg" },
     { name = "fastembed" },
@@ -3406,6 +3407,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.18.0" },
+    { name = "black", specifier = ">=25.12.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.12.0" },
     { name = "docling", specifier = ">=2.0.0" },
     { name = "en-core-web-lg", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl" },

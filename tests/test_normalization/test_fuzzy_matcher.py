@@ -39,7 +39,9 @@ def test_batch_matching_returns_top_candidates() -> None:
     attitude_matches = [m for m in matches if m.source.startswith("Attitude")]
 
     assert any(match.target == "power sub-system" and match.passed for match in power_matches)
-    assert any(match.target == "attitude controls system" and match.passed for match in attitude_matches)
+    assert any(
+        match.target == "attitude controls system" and match.passed for match in attitude_matches
+    )
 
 
 def test_threshold_override_applies_by_entity_type() -> None:
@@ -57,7 +59,9 @@ def test_config_threshold_override_applies_by_entity_type() -> None:
     config = NormalizationConfig(fuzzy_threshold_overrides={"SYSTEM": 0.81})
     matcher = FuzzyMatcher(config=config)
 
-    result = matcher.match_pair("Solar Array Drive", "Solar Array Drive Assembly", entity_type="system")
+    result = matcher.match_pair(
+        "Solar Array Drive", "Solar Array Drive Assembly", entity_type="system"
+    )
 
     assert result.threshold == pytest.approx(0.81)
 
@@ -65,7 +69,9 @@ def test_config_threshold_override_applies_by_entity_type() -> None:
 def test_generate_candidates_excludes_self_and_dedupes() -> None:
     matcher = FuzzyMatcher()
 
-    candidates = matcher.generate_candidates(["Power subsystem", "power sub-system", "Thermal control"])
+    candidates = matcher.generate_candidates(
+        ["Power subsystem", "power sub-system", "Thermal control"]
+    )
 
     assert all(candidate.source != candidate.target for candidate in candidates)
     assert len({(c.source_normalized, c.target_normalized) for c in candidates}) == len(candidates)

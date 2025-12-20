@@ -31,7 +31,7 @@ class TextCleaner:
     def __init__(
         self,
         config: Optional[TextCleaningConfig] = None,
-        patterns_file: Optional[str | Path] = None
+        patterns_file: Optional[str | Path] = None,
     ) -> None:
         """Initialize the text cleaner.
 
@@ -100,15 +100,19 @@ class TextCleaner:
             ]
 
         # Compile OCR correction patterns
-        if "ocr_corrections" in self.patterns and self.patterns["ocr_corrections"].get("enabled", False):
+        if "ocr_corrections" in self.patterns and self.patterns["ocr_corrections"].get(
+            "enabled", False
+        ):
             self.compiled_patterns["ocr_corrections"] = []
             for item in self.patterns["ocr_corrections"].get("patterns", []):
                 if isinstance(item, dict):
-                    self.compiled_patterns["ocr_corrections"].append({
-                        "pattern": re.compile(item["pattern"]),
-                        "replacement": item.get("replacement", ""),
-                        "context": item.get("context", ""),
-                    })
+                    self.compiled_patterns["ocr_corrections"].append(
+                        {
+                            "pattern": re.compile(item["pattern"]),
+                            "replacement": item.get("replacement", ""),
+                            "context": item.get("context", ""),
+                        }
+                    )
 
     def clean(self, text: str) -> str:
         """Clean text by removing noise and normalizing whitespace.
@@ -282,12 +286,7 @@ class TextCleaner:
 
         return text
 
-    def _replace_in_numeric_context(
-        self,
-        text: str,
-        pattern: re.Pattern,
-        replacement: str
-    ) -> str:
+    def _replace_in_numeric_context(self, text: str, pattern: re.Pattern, replacement: str) -> str:
         """Replace pattern only in numeric contexts.
 
         Args:
@@ -299,14 +298,14 @@ class TextCleaner:
             Text with replacements in numeric context
         """
         # Find numeric contexts (surrounded by digits)
-        numeric_context = re.compile(r'\d+[^\d]*\d+')
+        numeric_context = re.compile(r"\d+[^\d]*\d+")
 
         result = []
         last_end = 0
 
         for match in numeric_context.finditer(text):
             # Keep text before match
-            result.append(text[last_end:match.start()])
+            result.append(text[last_end : match.start()])
 
             # Apply replacement in numeric context
             context_text = match.group(0)
@@ -320,12 +319,7 @@ class TextCleaner:
 
         return "".join(result)
 
-    def _replace_in_word_context(
-        self,
-        text: str,
-        pattern: re.Pattern,
-        replacement: str
-    ) -> str:
+    def _replace_in_word_context(self, text: str, pattern: re.Pattern, replacement: str) -> str:
         """Replace pattern only within words.
 
         Args:
@@ -337,14 +331,14 @@ class TextCleaner:
             Text with replacements in word context
         """
         # Match words with the pattern inside
-        word_pattern = re.compile(r'\b\w*' + pattern.pattern + r'\w*\b')
+        word_pattern = re.compile(r"\b\w*" + pattern.pattern + r"\w*\b")
 
         result = []
         last_end = 0
 
         for match in word_pattern.finditer(text):
             # Keep text before match
-            result.append(text[last_end:match.start()])
+            result.append(text[last_end : match.start()])
 
             # Apply replacement within word
             word = match.group(0)
@@ -368,19 +362,19 @@ class TextCleaner:
             Text with normalized whitespace
         """
         # Collapse multiple spaces to single space
-        text = re.sub(r' {2,}', ' ', text)
+        text = re.sub(r" {2,}", " ", text)
 
         # Normalize newlines (max 2 consecutive)
-        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
 
         # Remove trailing spaces on lines
-        text = re.sub(r' +$', '', text, flags=re.MULTILINE)
+        text = re.sub(r" +$", "", text, flags=re.MULTILINE)
 
         # Remove lines with only whitespace
-        text = re.sub(r'^\s+$', '', text, flags=re.MULTILINE)
+        text = re.sub(r"^\s+$", "", text, flags=re.MULTILINE)
 
         # Normalize special whitespace characters
-        text = re.sub(r'[\t\r\f\v]', ' ', text)
+        text = re.sub(r"[\t\r\f\v]", " ", text)
 
         return text.strip()
 

@@ -472,9 +472,7 @@ def _parse_cluster_arg(cluster_arg: str) -> tuple[str, List[str]]:
 
 @app.command("batch-merge")
 def batch_merge(
-    cluster: List[str] = typer.Argument(
-        ..., help="Cluster spec primary:dup1,dup2 (repeatable)."
-    ),
+    cluster: List[str] = typer.Argument(..., help="Cluster spec primary:dup1,dup2 (repeatable)."),
     dry_run: bool = typer.Option(False, help="Preview without executing."),
     table_path: Path | None = typer.Option(None, help="Override normalization table path."),
     config: Path = typer.Option(Path("config/config.yaml"), help="Path to config file."),

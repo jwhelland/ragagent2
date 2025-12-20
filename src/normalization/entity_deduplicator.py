@@ -152,7 +152,9 @@ class EntityDeduplicator:
             while queue:
                 current = queue.pop()
                 cluster.append(current)
-                for neighbor in self._neighbors(current, similarity_matrix, threshold, entities=entities):
+                for neighbor in self._neighbors(
+                    current, similarity_matrix, threshold, entities=entities
+                ):
                     if neighbor not in visited:
                         visited.add(neighbor)
                         queue.append(neighbor)
@@ -277,9 +279,7 @@ class EntityDeduplicator:
     def _confidence_score(
         self, similarity: float, type_alignment: float, mention_support: float
     ) -> float:
-        confidence = (
-            similarity * 0.7 + type_alignment * 0.2 + mention_support * 0.1
-        )
+        confidence = similarity * 0.7 + type_alignment * 0.2 + mention_support * 0.1
         return float(max(0.0, min(1.0, confidence)))
 
     def _should_auto_merge(self, similarity: float, type_alignment: float) -> bool:

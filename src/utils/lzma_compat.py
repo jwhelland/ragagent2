@@ -22,7 +22,7 @@ def ensure_lzma() -> ModuleType:
     except ModuleNotFoundError:
         try:
             import backports.lzma as _lzma  # type: ignore
-        except ModuleNotFoundError as exc:
+        except ModuleNotFoundError:
             # Provide a lightweight shim so libraries that only import lzma can proceed.
             shim = ModuleType("lzma")
 

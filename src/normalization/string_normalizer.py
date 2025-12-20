@@ -133,7 +133,9 @@ class StringNormalizer:
             ord(src): dest for src, dest in self.rules.punctuation_replacements.items()
         }
         tighten_symbols = "".join(re.escape(sym) for sym in self.rules.tighten_around_symbols)
-        self._tighten_symbols_re = re.compile(rf"\s*([{tighten_symbols}])\s*") if tighten_symbols else None
+        self._tighten_symbols_re = (
+            re.compile(rf"\s*([{tighten_symbols}])\s*") if tighten_symbols else None
+        )
         allowed_symbols = "".join(re.escape(sym) for sym in self.rules.keep_symbols)
         self._unwanted_punct_re = re.compile(rf"[^\w\s{allowed_symbols}]")
         self._whitespace_re = re.compile(r"\s+")
@@ -251,7 +253,10 @@ class StringNormalizer:
         deduped: List[Tuple[int, int, str]] = []
 
         for start, end, value in sorted_spans:
-            if any(existing_start <= start < existing_end for existing_start, existing_end, _ in deduped):
+            if any(
+                existing_start <= start < existing_end
+                for existing_start, existing_end, _ in deduped
+            ):
                 continue
             deduped.append((start, end, value))
 

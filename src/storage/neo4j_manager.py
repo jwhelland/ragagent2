@@ -254,7 +254,8 @@ class Neo4jManager:
             # Create index on document_id for chunks
             try:
                 session.run(
-                    "CREATE INDEX chunk_document_id IF NOT EXISTS " "FOR (c:Chunk) ON (c.document_id)"
+                    "CREATE INDEX chunk_document_id IF NOT EXISTS "
+                    "FOR (c:Chunk) ON (c.document_id)"
                 )
                 logger.info("Created document_id index for chunks")
             except Neo4jError as e:
@@ -505,7 +506,9 @@ class Neo4jManager:
             )
             return [dict(record["c"]) for record in result]
 
-    def update_relationship_candidate_status(self, identifier: str, status: CandidateStatus) -> bool:
+    def update_relationship_candidate_status(
+        self, identifier: str, status: CandidateStatus
+    ) -> bool:
         """Update the status of a RelationshipCandidate by id or candidate_key."""
         with self.session() as session:
             result = session.run(
@@ -698,7 +701,9 @@ class Neo4jManager:
             logger.debug(f"Upserted entity {entity_id} of type {entity.entity_type.value}")
             return entity_id
 
-    def get_entity(self, entity_id: str, entity_type: Optional[EntityType] = None) -> Optional[Dict[str, Any]]:
+    def get_entity(
+        self, entity_id: str, entity_type: Optional[EntityType] = None
+    ) -> Optional[Dict[str, Any]]:
         """Get an entity by ID.
 
         Args:
@@ -782,7 +787,10 @@ class Neo4jManager:
             RETURN n.id as id
             """
             result = session.run(
-                query, entity_id=entity_id, properties=properties, entity_types=[et.value for et in EntityType]
+                query,
+                entity_id=entity_id,
+                properties=properties,
+                entity_types=[et.value for et in EntityType],
             )
             if result.single():
                 logger.debug(f"Updated entity {entity_id}")
@@ -805,7 +813,9 @@ class Neo4jManager:
             DETACH DELETE n
             RETURN count(n) as deleted
             """
-            result = session.run(query, entity_id=entity_id, entity_types=[et.value for et in EntityType])
+            result = session.run(
+                query, entity_id=entity_id, entity_types=[et.value for et in EntityType]
+            )
             deleted = result.single()["deleted"]
             if deleted > 0:
                 logger.debug(f"Deleted entity {entity_id}")
@@ -1018,7 +1028,9 @@ class Neo4jManager:
             elif direction == "incoming":
                 match_pattern = "(source)-[r]->(target {id: $entity_id})"
             else:  # both
-                match_pattern = "(source)-[r]-(target) WHERE source.id = $entity_id OR target.id = $entity_id"
+                match_pattern = (
+                    "(source)-[r]-(target) WHERE source.id = $entity_id OR target.id = $entity_id"
+                )
 
             query = f"""
             MATCH {match_pattern}
@@ -1187,7 +1199,9 @@ class Neo4jManager:
                 return dict(record["c"])
             return None
 
-    def get_chunks_by_document(self, document_id: str, level: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_chunks_by_document(
+        self, document_id: str, level: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """Get all chunks for a document.
 
         Args:
@@ -1240,7 +1254,9 @@ class Neo4jManager:
                 rel_types = "|".join([rt.value for rt in relationship_types])
                 match_pattern = f"(source {{id: $source_id}})-[r:{rel_types}*1..{max_depth}]-(target {{id: $target_id}})"
             else:
-                match_pattern = f"(source {{id: $source_id}})-[r*1..{max_depth}]-(target {{id: $target_id}})"
+                match_pattern = (
+                    f"(source {{id: $source_id}})-[r*1..{max_depth}]-(target {{id: $target_id}})"
+                )
 
             query = f"""
             MATCH path = {match_pattern}
@@ -1395,7 +1411,9 @@ class Neo4jManager:
             session.run(query)
             logger.warning("Cleared all data from Neo4j database")
 
-    def execute_cypher(self, query: str, parameters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def execute_cypher(
+        self, query: str, parameters: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
         """Execute a custom Cypher query.
 
         Args:

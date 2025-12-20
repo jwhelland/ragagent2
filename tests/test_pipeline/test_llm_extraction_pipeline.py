@@ -8,7 +8,9 @@ from src.utils.config import Config
 
 
 class _Chunk:
-    def __init__(self, chunk_id: str, document_id: str, content: str, metadata: Dict[str, Any]) -> None:
+    def __init__(
+        self, chunk_id: str, document_id: str, content: str, metadata: Dict[str, Any]
+    ) -> None:
         self.chunk_id = chunk_id
         self.document_id = document_id
         self.level = 3
@@ -22,7 +24,9 @@ class _FakeLLMExtractor:
         self.relationship_known_entities: List[Any] = []
 
     def extract_entities(self, chunk: Any, *, document_context: Dict[str, Any] | None = None):
-        self.entity_calls.append({"chunk_id": getattr(chunk, "chunk_id", None), "context": document_context})
+        self.entity_calls.append(
+            {"chunk_id": getattr(chunk, "chunk_id", None), "context": document_context}
+        )
         return [
             LLMExtractedEntity(
                 name="solar array",

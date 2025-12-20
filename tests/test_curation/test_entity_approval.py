@@ -46,7 +46,9 @@ class _FakeManager:
     ) -> List[Dict[str, Any]]:
         return list(self.relationship_candidate_rows)
 
-    def update_relationship_candidate_status(self, identifier: str, status: CandidateStatus) -> bool:
+    def update_relationship_candidate_status(
+        self, identifier: str, status: CandidateStatus
+    ) -> bool:
         self.relationship_status_updates.append((identifier, status))
         return True
 
@@ -71,7 +73,9 @@ def test_approve_candidate_promotes_and_updates_normalization(tmp_path: Path) ->
     manager = _FakeManager()
     table_path = tmp_path / "normalization.json"
     table = NormalizationTable(table_path=table_path)
-    service = EntityCurationService(manager, table, Config(), undo_stack_path=tmp_path / "undo.json")
+    service = EntityCurationService(
+        manager, table, Config(), undo_stack_path=tmp_path / "undo.json"
+    )
 
     candidate = _candidate(aliases=["EPS"], source_documents=["doc-1"])
     entity_id = service.approve_candidate(candidate)
@@ -88,7 +92,9 @@ def test_approve_candidate_promotes_and_updates_normalization(tmp_path: Path) ->
 def test_reject_and_undo_restore_status(tmp_path: Path) -> None:
     manager = _FakeManager()
     table = NormalizationTable(table_path=tmp_path / "norm.json")
-    service = EntityCurationService(manager, table, Config(), undo_stack_path=tmp_path / "undo.json")
+    service = EntityCurationService(
+        manager, table, Config(), undo_stack_path=tmp_path / "undo.json"
+    )
 
     candidate = _candidate(candidate_key="cand-undo")
     service.reject_candidate(candidate, reason="noise")
@@ -101,9 +107,13 @@ def test_reject_and_undo_restore_status(tmp_path: Path) -> None:
 def test_merge_candidates_and_undo(tmp_path: Path) -> None:
     manager = _FakeManager()
     table = NormalizationTable(table_path=tmp_path / "norm.json")
-    service = EntityCurationService(manager, table, Config(), undo_stack_path=tmp_path / "undo.json")
+    service = EntityCurationService(
+        manager, table, Config(), undo_stack_path=tmp_path / "undo.json"
+    )
 
-    primary = _candidate(candidate_key="cand-primary", canonical_name="Power System", mention_count=3)
+    primary = _candidate(
+        candidate_key="cand-primary", canonical_name="Power System", mention_count=3
+    )
     duplicate = _candidate(candidate_key="cand-dup", canonical_name="Power Sys", mention_count=2)
 
     entity_id = service.merge_candidates(primary, [duplicate])
@@ -124,7 +134,9 @@ def test_merge_candidates_and_undo(tmp_path: Path) -> None:
 def test_approve_promotes_resolved_relationship_candidates(tmp_path: Path) -> None:
     manager = _FakeManager()
     table = NormalizationTable(table_path=tmp_path / "norm.json")
-    service = EntityCurationService(manager, table, Config(), undo_stack_path=tmp_path / "undo.json")
+    service = EntityCurationService(
+        manager, table, Config(), undo_stack_path=tmp_path / "undo.json"
+    )
 
     table.upsert(
         NormalizationEntry(

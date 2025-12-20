@@ -39,7 +39,9 @@ class _FakeManager:
     ) -> List[Dict[str, Any]]:
         return list(self.relationship_candidate_rows)
 
-    def update_relationship_candidate_status(self, identifier: str, status: CandidateStatus) -> bool:
+    def update_relationship_candidate_status(
+        self, identifier: str, status: CandidateStatus
+    ) -> bool:
         return True
 
     def upsert_relationship(self, relationship) -> str:  # type: ignore[override]
@@ -59,7 +61,9 @@ def _candidate(key: str, confidence: float) -> EntityCandidate:
 def test_batch_approve_respects_threshold(tmp_path: Path) -> None:
     manager = _FakeManager()
     table = NormalizationTable(table_path=tmp_path / "norm.json")
-    service = EntityCurationService(manager, table, Config(), undo_stack_path=tmp_path / "undo.json")
+    service = EntityCurationService(
+        manager, table, Config(), undo_stack_path=tmp_path / "undo.json"
+    )
     batch_service = BatchCurationService(service, CurationConfig(auto_approve_threshold=0.8))
 
     candidates = [
@@ -79,7 +83,9 @@ def test_batch_approve_respects_threshold(tmp_path: Path) -> None:
 def test_batch_merge_clusters_handles_multiple_groups(tmp_path: Path) -> None:
     manager = _FakeManager()
     table = NormalizationTable(table_path=tmp_path / "norm.json")
-    service = EntityCurationService(manager, table, Config(), undo_stack_path=tmp_path / "undo.json")
+    service = EntityCurationService(
+        manager, table, Config(), undo_stack_path=tmp_path / "undo.json"
+    )
     batch_service = BatchCurationService(service, CurationConfig())
 
     clusters = [

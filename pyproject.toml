@@ -47,6 +47,7 @@ dependencies = [
     "pip>=25.3",
     "en-core-web-lg",
     "ruff>=0.14.9",
+    "black>=25.12.0",
 ]
 
 [project.optional-dependencies]

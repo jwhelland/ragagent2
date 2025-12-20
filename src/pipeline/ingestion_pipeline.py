@@ -1,7 +1,7 @@
 """End-to-end document ingestion pipeline.
 
 This module orchestrates the complete document processing workflow:
-1. PDF parsing with structure extraction
+1. Document parsing (PDF via Docling; text/markdown via lightweight parser)
 2. Text cleaning and preprocessing
 3. Hierarchical chunking
 4. Embedding generation
@@ -30,10 +30,18 @@ from src.ingestion.text_rewriter import TextRewriter
 from src.normalization import EntityDeduplicator, EntityRecord, StringNormalizer
 from src.storage.neo4j_manager import Neo4jManager
 from src.storage.qdrant_manager import QdrantManager
-from src.storage.schemas import Chunk as GraphChunk
-from src.storage.schemas import Document, EntityCandidate, EntityType, RelationshipCandidate
+from src.storage.schemas import (
+    Chunk as GraphChunk,
+)
+from src.storage.schemas import (
+    Document,
+    EntityCandidate,
+    EntityType,
+    RelationshipCandidate,
+)
 from src.utils.config import Config
 from src.utils.embeddings import EmbeddingGenerator
+
 if TYPE_CHECKING:
     from src.ingestion.pdf_parser import PDFParser
     from src.normalization.acronym_resolver import AcronymResolver
@@ -256,7 +264,7 @@ class IngestionPipeline:
     def process_document(
         self, pdf_path: Path | str, *, force_reingest: bool = False
     ) -> IngestionResult:
-        """Process a single PDF document end-to-end.
+        """Process a single document end-to-end.
 
         Implements basic resume/rollback semantics:
         - Resume/skip if the document exists in Neo4j with matching checksum and status=completed.
@@ -265,10 +273,7 @@ class IngestionPipeline:
         - On failures during storage, we roll back partial chunk writes and mark the document failed.
 
         Args:
-            pdf_path: Path to the PDF file
-
-        Args:
-            pdf_path: Path to the PDF file
+            pdf_path: Path to the document file (.pdf, .txt, .md)
             force_reingest: If True, ignore checkpoint skip and reprocess the document (after cleanup)
 
         Returns:
@@ -276,6 +281,7 @@ class IngestionPipeline:
         """
         start_time = time.time()
         pdf_path = Path(pdf_path)
+        suffix = pdf_path.suffix.lower()
 
         logger.info(f"Processing document: {pdf_path.name}")
 
@@ -294,18 +300,27 @@ class IngestionPipeline:
             chunker = self.chunker
             embeddings_generator = self.embeddings
             neo4j_manager = self.neo4j_manager
-            assert pdf_parser is not None
             assert text_cleaner is not None
             assert chunker is not None
             assert embeddings_generator is not None
             assert neo4j_manager is not None
 
-            # Step 1: Parse PDF
-            logger.debug("Step 1: Parsing PDF")
-            parsed_doc = pdf_parser.parse_pdf(pdf_path)
+            # Step 1: Parse document
+            logger.debug("Step 1: Parsing document")
+            if suffix == ".pdf":
+                assert pdf_parser is not None
+                parsed_doc = pdf_parser.parse_pdf(pdf_path)
+            elif suffix in {".txt", ".md", ".markdown"}:
+                from src.ingestion.text_file_parser import TextFileParser
+
+                parsed_doc = TextFileParser().parse_file(pdf_path)
+            else:
+                raise ValueError(
+                    f"Unsupported document type: {suffix} (supported: .pdf, .txt, .md, .markdown)"
+                )
 
             if parsed_doc.error:
-                raise Exception(f"PDF parsing failed: {parsed_doc.error}")
+                raise Exception(f"Document parsing failed: {parsed_doc.error}")
 
                 # Resume / cleanup logic (based on deterministic document_id + checksum)
             if self.config.pipeline.enable_checkpointing:
@@ -395,9 +410,7 @@ class IngestionPipeline:
             )
             if can_parallelize:
                 with ThreadPoolExecutor(max_workers=2) as executor:
-                    spacy_future = executor.submit(
-                        self._extract_spacy_entities, chunks, progress
-                    )
+                    spacy_future = executor.submit(self._extract_spacy_entities, chunks, progress)
                     llm_future = executor.submit(self._extract_llm_entities, chunks, progress)
                     spacy_entities_created = spacy_future.result()
                     llm_entities_created = llm_future.result()

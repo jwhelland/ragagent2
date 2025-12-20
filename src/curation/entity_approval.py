@@ -201,7 +201,13 @@ class EntityCurationService:
         if not updates:
             return candidate
 
-        allowed_fields = {"canonical_name", "aliases", "description", "candidate_type", "confidence_score"}
+        allowed_fields = {
+            "canonical_name",
+            "aliases",
+            "description",
+            "candidate_type",
+            "confidence_score",
+        }
         sanitized = {k: v for k, v in updates.items() if k in allowed_fields}
         if not sanitized:
             return candidate
@@ -252,7 +258,10 @@ class EntityCurationService:
             status=EntityStatus.APPROVED,
             mention_count=mention_count,
             source_documents=source_documents,
-            properties={"chunk_ids": chunk_ids, "merged_candidate_keys": [c.candidate_key for c in all_candidates]},
+            properties={
+                "chunk_ids": chunk_ids,
+                "merged_candidate_keys": [c.candidate_key for c in all_candidates],
+            },
         )
         entity_id = self.manager.upsert_entity(entity)
 
@@ -262,7 +271,9 @@ class EntityCurationService:
             previous_statuses.append(
                 StatusCheckpoint(identifier=identifier, previous_status=candidate.status)
             )
-            new_status = CandidateStatus.APPROVED if candidate is primary else CandidateStatus.REJECTED
+            new_status = (
+                CandidateStatus.APPROVED if candidate is primary else CandidateStatus.REJECTED
+            )
             self.manager.update_entity_candidate_status(identifier, new_status)
 
         normalization_changes = self._upsert_normalization_entries(
@@ -353,9 +364,7 @@ class EntityCurationService:
             self.undo_last_operation()
 
     # Helpers --------------------------------------------------------
-    def _entity_from_candidate(
-        self, candidate: EntityCandidate, status: EntityStatus
-    ) -> Entity:
+    def _entity_from_candidate(self, candidate: EntityCandidate, status: EntityStatus) -> Entity:
         return Entity(
             canonical_name=candidate.canonical_name,
             entity_type=candidate.candidate_type,
@@ -479,7 +488,10 @@ class EntityCurationService:
             target_record = self.normalization_table.lookup(rc.target)
             if not (source_record and target_record):
                 continue
-            if source_record.status.lower() != "approved" or target_record.status.lower() != "approved":
+            if (
+                source_record.status.lower() != "approved"
+                or target_record.status.lower() != "approved"
+            ):
                 continue
             if not (source_record.canonical_id and target_record.canonical_id):
                 continue

@@ -353,9 +353,11 @@ class Config(BaseSettings):
         db_env_overrides = DatabaseConfig().model_dump(exclude_defaults=True)
         if db_env_overrides:
             env_overrides["database"] = cls._deep_merge_dict(
-                yaml_config.get("database", {})
-                if isinstance(yaml_config.get("database", {}), dict)
-                else {},
+                (
+                    yaml_config.get("database", {})
+                    if isinstance(yaml_config.get("database", {}), dict)
+                    else {}
+                ),
                 db_env_overrides,
             )
 

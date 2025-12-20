@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """Document ingestion CLI script.
 
-This script processes PDF documents through the complete ingestion pipeline,
-storing chunks and embeddings in Neo4j and Qdrant databases.
+This script processes documents through the ingestion pipeline, storing chunks and
+embeddings in Neo4j and Qdrant databases.
+
+Supported inputs:
+- PDF: `.pdf` (parsed via Docling)
+- Text: `.txt`, `.md`, `.markdown` (parsed without Docling; enable with `--include-text`)
 
 Usage:
     python scripts/ingest_documents.py document.pdf
+    python scripts/ingest_documents.py --include-text notes.md
     python scripts/ingest_documents.py --directory data/raw/
     python scripts/ingest_documents.py --config config/custom.yaml file1.pdf file2.pdf
 
 Options:
-    --directory, -d: Process all PDFs in directory
+    --directory, -d: Process documents in directory
+    --include-text: Include .txt/.md/.markdown files
     --config, -c: Path to config file (default: config/config.yaml)
     --batch-size: Number of documents to process in parallel (default: 1)
     --verbose, -v: Enable verbose logging
@@ -31,45 +37,63 @@ from src.pipeline.ingestion_pipeline import IngestionPipeline
 from src.utils.config import load_config
 
 
-def find_pdf_files(paths: list[Path]) -> list[Path]:
-    """Find all PDF files from the given paths.
+def find_document_files(paths: list[Path], *, include_text: bool) -> list[Path]:
+    """Find all supported document files from the given paths.
 
     Args:
         paths: List of file or directory paths
+        include_text: Whether to include .txt/.md/.markdown files
 
     Returns:
-        List of PDF file paths
+        List of document file paths
     """
-    pdf_files = []
+    allowed_suffixes = {".pdf"}
+    if include_text:
+        allowed_suffixes |= {".txt", ".md", ".markdown"}
+
+    document_files: list[Path] = []
 
     for path in paths:
         if path.is_file():
-            if path.suffix.lower() == ".pdf":
-                pdf_files.append(path)
+            if path.suffix.lower() in allowed_suffixes:
+                document_files.append(path)
             else:
-                logger.warning(f"Skipping non-PDF file: {path}")
+                logger.warning(f"Skipping unsupported file: {path}")
         elif path.is_dir():
-            # Find all PDFs in directory recursively
-            for pdf_path in path.rglob("*.pdf"):
-                pdf_files.append(pdf_path)
+            # Find all supported formats in directory recursively
+            for suffix in sorted(allowed_suffixes):
+                for file_path in path.rglob(f"*{suffix}"):
+                    document_files.append(file_path)
         else:
             logger.warning(f"Path does not exist: {path}")
 
-    return sorted(pdf_files)
+    # De-dup while preserving sort order.
+    return sorted({p.resolve() for p in document_files})
 
 
 def main():
     """Main CLI function."""
     parser = argparse.ArgumentParser(
-        description="Ingest PDF documents into the Graph RAG system",
+        description="Ingest documents into the Graph RAG system",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
 
-    parser.add_argument("paths", nargs="*", type=Path, help="PDF files or directories to process")
+    parser.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        help="Files or directories to process (PDF by default; add --include-text for .txt/.md)",
+    )
 
     parser.add_argument(
-        "--directory", "-d", type=Path, help="Directory containing PDF files to process"
+        "--directory", "-d", type=Path, help="Directory containing files to process"
+    )
+
+    parser.add_argument(
+        "--include-text",
+        action="store_true",
+        help="Also ingest .txt/.md/.markdown files (bypasses Docling for these formats)",
     )
 
     parser.add_argument(
@@ -106,7 +130,7 @@ def main():
         paths_to_process.append(args.directory)
 
     if not paths_to_process:
-        parser.error("No PDF files or directories specified. Use --help for usage.")
+        parser.error("No files or directories specified. Use --help for usage.")
 
     # Configure logging
     log_level = "DEBUG" if args.verbose else "INFO"
@@ -127,14 +151,14 @@ def main():
         logger.info(f"Loading configuration from {args.config}")
         config = load_config(args.config)
 
-        # Find PDF files
-        pdf_files = find_pdf_files(paths_to_process)
+        # Find supported document files
+        pdf_files = find_document_files(paths_to_process, include_text=args.include_text)
 
         if not pdf_files:
-            logger.error("No PDF files found to process")
+            logger.error("No supported documents found to process")
             return 1
 
-        logger.info(f"Found {len(pdf_files)} PDF files to process")
+        logger.info(f"Found {len(pdf_files)} documents to process")
 
         if args.dry_run:
             logger.info("Dry run mode - would process:")

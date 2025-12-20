@@ -15,15 +15,15 @@ def _write_rules(path: Path) -> None:
                 "unicode_form: NFKC",
                 "collapse_whitespace: true",
                 "preserve_case_terms:",
-                "  - \"C++\"",
-                "  - \"GPU\"",
+                '  - "C++"',
+                '  - "GPU"',
                 "punctuation_replacements:",
-                "  \"–\": \"-\"",
-                "  \"—\": \"-\"",
-                "  \"“\": '\"'",
-                "  \"”\": '\"'",
+                '  "–": "-"',
+                '  "—": "-"',
+                '  "“": \'"\'',
+                '  "”": \'"\'',
                 "strip_characters:",
-                "  - \"\\u200b\"",
+                '  - "\\u200b"',
                 "keep_symbols: ['+', '#', '-', '/', '_', '.', ':', \"'\"]",
                 "tighten_around_symbols: ['+', '#', '/', '-']",
             ]
@@ -38,7 +38,7 @@ def test_normalizes_and_preserves_display_terms(tmp_path: Path) -> None:
 
     normalizer = StringNormalizer(rules_path=rules_file, rules=None)
 
-    result = normalizer.normalize('  “NASA” GPU systems — C++  ')
+    result = normalizer.normalize("  “NASA” GPU systems — C++  ")
 
     assert result.normalized == "nasa gpu systems - c++"
     assert result.display == "NASA GPU systems - C++"

@@ -52,7 +52,9 @@ class FuzzyMatcher:
             "Initialized FuzzyMatcher with base threshold {:.2f}", self.config.fuzzy_threshold
         )
 
-    def match_pair(self, source: str, target: str, entity_type: str | None = None) -> FuzzyMatchCandidate:
+    def match_pair(
+        self, source: str, target: str, entity_type: str | None = None
+    ) -> FuzzyMatchCandidate:
         """Score a single pair of strings."""
         source_norm = self._normalize(source)
         target_norm = self._normalize(target)
@@ -199,9 +201,7 @@ class FuzzyMatcher:
         if not source or not target:
             return 0.0
 
-        length_penalty = min(
-            abs(len(source) - len(target)) / max(len(source), len(target)), 0.4
-        )
+        length_penalty = min(abs(len(source) - len(target)) / max(len(source), len(target)), 0.4)
         length_penalty *= 0.25
 
         margin_bonus = max(0.0, normalized_score - threshold)

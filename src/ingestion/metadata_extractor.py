@@ -40,9 +40,7 @@ class MetadataExtractor:
         ]
 
     def extract_metadata(
-        self,
-        pdf_path: Path | str,
-        first_page_text: Optional[str] = None
+        self, pdf_path: Path | str, first_page_text: Optional[str] = None
     ) -> Dict[str, Any]:
         """Extract metadata from a PDF file.
 
@@ -210,10 +208,7 @@ class MetadataExtractor:
         except Exception:
             return date_str
 
-    def extract_batch(
-        self,
-        pdf_paths: list[Path | str]
-    ) -> list[Dict[str, Any]]:
+    def extract_batch(self, pdf_paths: list[Path | str]) -> list[Dict[str, Any]]:
         """Extract metadata from multiple PDF files.
 
         Args:
@@ -231,10 +226,12 @@ class MetadataExtractor:
             except Exception as e:
                 logger.error(f"Failed to extract metadata from {pdf_path}: {e}")
                 # Add minimal metadata for failed files
-                results.append({
-                    "filename": Path(pdf_path).name,
-                    "error": str(e),
-                    "page_count": 0,
-                })
+                results.append(
+                    {
+                        "filename": Path(pdf_path).name,
+                        "error": str(e),
+                        "page_count": 0,
+                    }
+                )
 
         return results
