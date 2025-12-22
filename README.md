@@ -10,6 +10,7 @@ A comprehensive Graph RAG (Retrieval-Augmented Generation) system designed to pr
 - **Knowledge Graph**: Neo4j graph database for entities and relationships
 - **Vector Search**: Qdrant vector database for semantic search
 - **Hybrid Retrieval**: Combined vector and graph search strategies
+- **Natural Language Generation**: Generate technical answers with source citations using LLMs
 - **Entity Curation**: Manual review interface for entity approval and merging
 - **Incremental Updates**: Handle document modifications without full reprocessing
 - **Relationship Provenance**: Track where relationships were found with source citations
@@ -198,7 +199,23 @@ Launches the Typer-based review CLI. Common workflow:
 - Batch approve: `uv run ragagent-review batch-approve --min-confidence 0.9 --dry-run --preview-limit 10`
 - Normalization table tools: `uv run ragagent-review normalization queue`, `... normalization show "<canonical>"`, `... normalization search "<term>"`, `... normalization stats`
 
-Flags you may need: `--config` to point at a different config file, `--table-path` for an alternate normalization table, `--verbose` via env `RICH_COLOR_SYSTEM=standard` if your terminal needs it.
+### Query the System
+
+Interactive CLI for hybrid retrieval and technical response generation.
+
+```bash
+# Start interactive query loop
+uv run ragagent-query
+
+# Run a single query and exit
+uv run ragagent-query --query "What are the core components of the power system?"
+
+# Run with verbose output (shows query analysis and retrieved chunks)
+uv run ragagent-query -v -q "How does the battery health check procedure work?"
+
+# Export results to a JSON file
+uv run ragagent-query -q "Thermal control dependencies" --export results.json
+```
 
 ## Project Structure
 
@@ -237,26 +254,23 @@ ragagent2/
 
 ```bash
 # Run all tests
-pytest
+uv run pytest
 
 # Run with coverage
-pytest --cov=src --cov-report=html
+uv run pytest --cov=src --cov-report=html
 
 # Run specific test file
-pytest tests/test_ingestion/test_pdf_parser.py
+uv run pytest tests/test_ingestion/test_pdf_parser.py
 ```
 
 ### Code Quality
 
 ```bash
 # Format code
-black src/ tests/
+uv run black src/ tests/
 
 # Lint code
-ruff check src/ tests/
-
-# Type checking
-mypy src/
+uv run ruff check src/ tests/
 ```
 
 ### Adding New Entity Types

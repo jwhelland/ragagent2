@@ -17,116 +17,23 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
-from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field
 
 from src.retrieval.graph_retriever import GraphPath, GraphRetrievalResult, GraphRetriever
+from src.retrieval.models import (
+    GeneratedResponse,
+    HybridChunk,
+    HybridRetrievalResult,
+    RetrievalStrategy,
+)
 from src.retrieval.query_parser import ParsedQuery, QueryIntent
+from src.retrieval.reranker import Reranker
+from src.retrieval.response_generator import ResponseGenerator
 from src.retrieval.vector_retriever import RetrievalResult, RetrievedChunk, VectorRetriever
 from src.storage.neo4j_manager import Neo4jManager
 from src.utils.config import Config, HybridSearchConfig, RerankingConfig
-
-
-class RetrievalStrategy(str, Enum):
-    """Hybrid retrieval strategy types."""
-
-    VECTOR_ONLY = "vector_only"  # Use only vector search
-    GRAPH_ONLY = "graph_only"  # Use only graph search
-    HYBRID_PARALLEL = "hybrid_parallel"  # Execute both in parallel
-    VECTOR_FIRST = "vector_first"  # Vector search, then graph for expansion
-    GRAPH_FIRST = "graph_first"  # Graph search, then vector for content
-
-
-class HybridChunk(BaseModel):
-    """Unified chunk representation for hybrid retrieval."""
-
-    model_config = ConfigDict(extra="allow")
-
-    chunk_id: str = Field(..., description="Unique chunk identifier")
-    document_id: str = Field(..., description="Source document ID")
-    content: str = Field(..., description="Chunk text content")
-    level: int = Field(..., ge=1, le=4, description="Hierarchy level")
-
-    # Scoring
-    vector_score: Optional[float] = Field(
-        None, ge=0.0, le=1.0, description="Vector similarity score"
-    )
-    graph_score: Optional[float] = Field(None, ge=0.0, le=1.0, description="Graph relevance score")
-    entity_coverage_score: float = Field(
-        default=0.0, ge=0.0, le=1.0, description="Entity coverage score"
-    )
-    confidence_score: float = Field(default=0.5, ge=0.0, le=1.0, description="Entity confidence")
-    diversity_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Diversity score")
-    final_score: float = Field(..., ge=0.0, le=1.0, description="Final fused score")
-
-    # Metadata
-    rank: int = Field(..., ge=1, description="Final rank in results")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Chunk metadata")
-    entity_ids: List[str] = Field(default_factory=list, description="Entity IDs in chunk")
-    graph_paths: List[str] = Field(
-        default_factory=list, description="Graph path IDs this chunk appears in"
-    )
-    source: str = Field(..., description="Source retriever (vector, graph, or hybrid)")
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return self.model_dump()
-
-
-class HybridRetrievalResult(BaseModel):
-    """Result of hybrid retrieval operation."""
-
-    model_config = ConfigDict(extra="allow")
-
-    query_id: str = Field(..., description="Query identifier")
-    query_text: str = Field(..., description="Original query text")
-    strategy_used: RetrievalStrategy = Field(..., description="Retrieval strategy used")
-    chunks: List[HybridChunk] = Field(default_factory=list, description="Retrieved chunks")
-    graph_paths: List[GraphPath] = Field(
-        default_factory=list, description="Graph paths (if applicable)"
-    )
-
-    # Statistics
-    total_results: int = Field(..., ge=0, description="Total results before reranking")
-    vector_results: int = Field(default=0, ge=0, description="Results from vector search")
-    graph_results: int = Field(default=0, ge=0, description="Results from graph search")
-    merged_results: int = Field(default=0, ge=0, description="Results after merging")
-
-    # Timing
-    retrieval_time_ms: float = Field(..., ge=0.0, description="Total retrieval time")
-    vector_time_ms: Optional[float] = Field(None, ge=0.0, description="Vector retrieval time")
-    graph_time_ms: Optional[float] = Field(None, ge=0.0, description="Graph retrieval time")
-    merge_time_ms: Optional[float] = Field(None, ge=0.0, description="Merge and rerank time")
-
-    # Metadata
-    vector_success: bool = Field(default=True, description="Vector retrieval succeeded")
-    graph_success: bool = Field(default=True, description="Graph retrieval succeeded")
-    reranking_enabled: bool = Field(default=False, description="Reranking was applied")
-    timestamp: datetime = Field(default_factory=datetime.now, description="Retrieval timestamp")
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        data = self.model_dump()
-        data["timestamp"] = self.timestamp.isoformat()
-        data["strategy_used"] = self.strategy_used.value
-        data["chunks"] = [c.to_dict() for c in self.chunks]
-        data["graph_paths"] = [p.model_dump() for p in self.graph_paths]
-        return data
-
-    def get_entity_ids(self) -> Set[str]:
-        """Extract all unique entity IDs from results."""
-        entity_ids: Set[str] = set()
-        for chunk in self.chunks:
-            entity_ids.update(chunk.entity_ids)
-        return entity_ids
-
-    def get_document_ids(self) -> Set[str]:
-        """Get all unique document IDs from results."""
-        return {chunk.document_id for chunk in self.chunks}
 
 
 class HybridRetriever:
@@ -138,6 +45,8 @@ class HybridRetriever:
         vector_retriever: Optional[VectorRetriever] = None,
         graph_retriever: Optional[GraphRetriever] = None,
         neo4j_manager: Optional[Neo4jManager] = None,
+        reranker: Optional[Reranker] = None,
+        response_generator: Optional[ResponseGenerator] = None,
     ) -> None:
         """Initialize hybrid retriever.
 
@@ -146,6 +55,8 @@ class HybridRetriever:
             vector_retriever: Vector retriever instance (created if None)
             graph_retriever: Graph retriever instance (created if None)
             neo4j_manager: Neo4j manager for fetching chunks (created if None)
+            reranker: Reranker instance (created if None)
+            response_generator: Response generator instance (created if None)
         """
         self.config = config or Config.from_yaml()
         self.hybrid_config: HybridSearchConfig = self.config.retrieval.hybrid
@@ -154,6 +65,8 @@ class HybridRetriever:
         # Initialize retrievers
         self.vector_retriever = vector_retriever or VectorRetriever(config=self.config)
         self.graph_retriever = graph_retriever or GraphRetriever(config=self.config)
+        self.reranker = reranker or Reranker(config=self.config)
+        self.response_generator = response_generator or ResponseGenerator(config=self.config)
 
         # Initialize Neo4j for fetching chunks
         if neo4j_manager is None:
@@ -175,6 +88,7 @@ class HybridRetriever:
         strategy: Optional[RetrievalStrategy] = None,
         top_k: Optional[int] = None,
         timeout: float = 10.0,
+        generate_answer: bool = False,
     ) -> HybridRetrievalResult:
         """Retrieve relevant results using hybrid search.
 
@@ -183,6 +97,7 @@ class HybridRetriever:
             strategy: Retrieval strategy (auto-selected if None)
             top_k: Number of final results to return (default from reranking config)
             timeout: Timeout for retrieval operations in seconds
+            generate_answer: Whether to generate a natural language answer
 
         Returns:
             HybridRetrievalResult with merged and ranked results
@@ -221,6 +136,14 @@ class HybridRetriever:
         else:
             raise ValueError(f"Unknown strategy: {strategy}")
 
+        # Generate answer if requested
+        if generate_answer:
+            logger.info("Generating response for query", query_id=query.query_id)
+            result.answer = self.response_generator.generate(
+                query_text=query.original_text,
+                retrieval_result=result,
+            )
+
         # Calculate total time
         total_time = (time.time() - start_time) * 1000
         result.retrieval_time_ms = total_time
@@ -236,6 +159,22 @@ class HybridRetriever:
         )
 
         return result
+
+    def generate_answer(
+        self,
+        query_text: str,
+        retrieval_result: HybridRetrievalResult,
+    ) -> GeneratedResponse:
+        """Generate a natural language answer from retrieval results.
+
+        Args:
+            query_text: Original user query
+            retrieval_result: Result from retrieve()
+
+        Returns:
+            GeneratedResponse object
+        """
+        return self.response_generator.generate(query_text, retrieval_result)
 
     def _select_strategy(self, query: ParsedQuery) -> RetrievalStrategy:
         """Select retrieval strategy based on query characteristics.
@@ -586,155 +525,13 @@ class HybridRetriever:
         # Convert to list
         all_chunks = list(chunks_by_id.values())
 
-        # Apply score fusion
-        fused_chunks = self._apply_score_fusion(all_chunks)
-
-        # Apply diversity ranking if enabled
-        if self.reranking_config.weights.get("diversity", 0.0) > 0:
-            fused_chunks = self._apply_diversity_ranking(fused_chunks)
-
-        # Sort by final score
-        fused_chunks.sort(key=lambda c: c.final_score, reverse=True)
-
-        # Take top-k and assign ranks
-        top_chunks = fused_chunks[:top_k]
-        for rank, chunk in enumerate(top_chunks, 1):
-            chunk.rank = rank
+        # Rerank and sort
+        reranked_chunks = self.reranker.rerank(all_chunks, top_k=top_k)
 
         # Get graph paths (if any)
         graph_paths = graph_result.paths if graph_result else []
 
-        return top_chunks, graph_paths
-
-    def _apply_score_fusion(self, chunks: List[HybridChunk]) -> List[HybridChunk]:
-        """Apply weighted score fusion to chunks.
-
-        Args:
-            chunks: List of HybridChunk objects
-
-        Returns:
-            Chunks with computed final_score
-        """
-        if not self.reranking_config.enabled:
-            # Simple average of available scores
-            for chunk in chunks:
-                scores = []
-                if chunk.vector_score is not None:
-                    scores.append(chunk.vector_score)
-                if chunk.graph_score is not None:
-                    scores.append(chunk.graph_score)
-                chunk.final_score = sum(scores) / len(scores) if scores else 0.0
-            return chunks
-
-        # Weighted fusion using config weights
-        weights = self.reranking_config.weights
-
-        for chunk in chunks:
-            score = 0.0
-            total_weight = 0.0
-
-            # Vector similarity score
-            if chunk.vector_score is not None:
-                weight = weights.get("vector_similarity", 0.4)
-                score += chunk.vector_score * weight
-                total_weight += weight
-
-            # Graph relevance score
-            if chunk.graph_score is not None:
-                weight = weights.get("graph_relevance", 0.3)
-                score += chunk.graph_score * weight
-                total_weight += weight
-
-            # Entity coverage score
-            weight = weights.get("entity_coverage", 0.15)
-            score += chunk.entity_coverage_score * weight
-            total_weight += weight
-
-            # Confidence score
-            weight = weights.get("confidence", 0.10)
-            score += chunk.confidence_score * weight
-            total_weight += weight
-
-            # Normalize by total weight
-            chunk.final_score = score / total_weight if total_weight > 0 else 0.0
-
-        return chunks
-
-    def _apply_diversity_ranking(self, chunks: List[HybridChunk]) -> List[HybridChunk]:
-        """Apply diversity-aware reranking using MMR-like approach.
-
-        Args:
-            chunks: List of HybridChunk objects (sorted by score)
-
-        Returns:
-            Reranked chunks with diversity scores
-        """
-        if len(chunks) <= 1:
-            return chunks
-
-        diversity_weight = self.reranking_config.weights.get("diversity", 0.05)
-
-        # Calculate diversity scores based on content similarity
-        selected: List[HybridChunk] = []
-        remaining = chunks.copy()
-
-        # Select first chunk (highest score)
-        selected.append(remaining.pop(0))
-        selected[0].diversity_score = 1.0
-
-        # Iteratively select remaining chunks
-        while remaining:
-            best_idx = 0
-            best_score = float("-inf")
-
-            for idx, candidate in enumerate(remaining):
-                # Calculate diversity (dissimilarity to selected chunks)
-                max_similarity = 0.0
-                for selected_chunk in selected:
-                    similarity = self._content_similarity(candidate.content, selected_chunk.content)
-                    max_similarity = max(max_similarity, similarity)
-
-                # Diversity score (1 - max similarity)
-                diversity = 1.0 - max_similarity
-                candidate.diversity_score = diversity
-
-                # Combined score with diversity bonus
-                combined = (
-                    candidate.final_score * (1 - diversity_weight) + diversity * diversity_weight
-                )
-
-                if combined > best_score:
-                    best_score = combined
-                    best_idx = idx
-
-            # Move best candidate to selected
-            selected.append(remaining.pop(best_idx))
-
-        return selected
-
-    def _content_similarity(self, text1: str, text2: str) -> float:
-        """Calculate simple content similarity using Jaccard on words.
-
-        Args:
-            text1: First text
-            text2: Second text
-
-        Returns:
-            Similarity score between 0 and 1
-        """
-        if not text1 or not text2:
-            return 0.0
-
-        words1 = set(text1.lower().split())
-        words2 = set(text2.lower().split())
-
-        if not words1 or not words2:
-            return 0.0
-
-        intersection = len(words1 & words2)
-        union = len(words1 | words2)
-
-        return intersection / union if union > 0 else 0.0
+        return reranked_chunks, graph_paths
 
     def _extract_chunks_from_graph(
         self, graph_result: GraphRetrievalResult, entity_mentions: List[Any]

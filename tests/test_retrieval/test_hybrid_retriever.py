@@ -13,11 +13,9 @@ from src.retrieval.graph_retriever import (
     TraversalStrategy,
 )
 from src.retrieval.hybrid_retriever import (
-    HybridChunk,
-    HybridRetrievalResult,
     HybridRetriever,
-    RetrievalStrategy,
 )
+from src.retrieval.models import HybridChunk, HybridRetrievalResult, RetrievalStrategy
 from src.retrieval.query_parser import EntityMention, ParsedQuery, QueryIntent
 from src.retrieval.vector_retriever import RetrievalResult, RetrievedChunk, VectorRetriever
 from src.storage.neo4j_manager import Neo4jManager
@@ -524,131 +522,6 @@ class TestHybridParallelRetrieval:
         assert result.vector_success is False
         assert result.graph_success is False
         assert len(result.chunks) == 0
-
-
-class TestScoreFusion:
-    """Tests for score fusion and reranking."""
-
-    def test_apply_score_fusion_with_both_scores(self, hybrid_retriever: HybridRetriever) -> None:
-        """Test score fusion with both vector and graph scores."""
-        chunks = [
-            HybridChunk(
-                chunk_id="chunk_1",
-                document_id="doc_001",
-                content="Test content",
-                level=3,
-                vector_score=0.9,
-                graph_score=0.7,
-                entity_coverage_score=0.8,
-                confidence_score=0.85,
-                diversity_score=0.0,
-                final_score=0.0,  # Will be computed
-                rank=1,
-                source="hybrid",
-            )
-        ]
-
-        fused = hybrid_retriever._apply_score_fusion(chunks)
-
-        assert len(fused) == 1
-        assert fused[0].final_score > 0.0
-        assert fused[0].final_score <= 1.0
-
-    def test_apply_score_fusion_vector_only(self, hybrid_retriever: HybridRetriever) -> None:
-        """Test score fusion with only vector score."""
-        chunks = [
-            HybridChunk(
-                chunk_id="chunk_1",
-                document_id="doc_001",
-                content="Test content",
-                level=3,
-                vector_score=0.9,
-                graph_score=None,
-                entity_coverage_score=0.0,
-                confidence_score=0.5,
-                diversity_score=0.0,
-                final_score=0.0,
-                rank=1,
-                source="vector",
-            )
-        ]
-
-        fused = hybrid_retriever._apply_score_fusion(chunks)
-
-        assert len(fused) == 1
-        assert fused[0].final_score > 0.0
-
-    def test_apply_score_fusion_graph_only(self, hybrid_retriever: HybridRetriever) -> None:
-        """Test score fusion with only graph score."""
-        chunks = [
-            HybridChunk(
-                chunk_id="chunk_1",
-                document_id="doc_001",
-                content="Test content",
-                level=3,
-                vector_score=None,
-                graph_score=0.8,
-                entity_coverage_score=0.6,
-                confidence_score=0.7,
-                diversity_score=0.0,
-                final_score=0.0,
-                rank=1,
-                source="graph",
-            )
-        ]
-
-        fused = hybrid_retriever._apply_score_fusion(chunks)
-
-        assert len(fused) == 1
-        assert fused[0].final_score > 0.0
-
-
-class TestDiversityRanking:
-    """Tests for diversity-aware ranking."""
-
-    def test_apply_diversity_ranking(self, hybrid_retriever: HybridRetriever) -> None:
-        """Test diversity ranking with similar content."""
-        chunks = [
-            HybridChunk(
-                chunk_id=f"chunk_{i}",
-                document_id="doc_001",
-                content=(
-                    "power system thermal control management"
-                    if i < 2
-                    else "battery voltage monitoring"
-                ),
-                level=3,
-                vector_score=0.9 - (i * 0.05),
-                graph_score=0.8,
-                entity_coverage_score=0.7,
-                confidence_score=0.8,
-                diversity_score=0.0,
-                final_score=0.9 - (i * 0.05),
-                rank=i + 1,
-                source="hybrid",
-            )
-            for i in range(4)
-        ]
-
-        diverse = hybrid_retriever._apply_diversity_ranking(chunks)
-
-        assert len(diverse) == 4
-        # Check that diversity scores were computed
-        assert all(chunk.diversity_score >= 0.0 for chunk in diverse)
-
-    def test_content_similarity(self, hybrid_retriever: HybridRetriever) -> None:
-        """Test content similarity calculation."""
-        text1 = "power system thermal control"
-        text2 = "power system management control"
-        text3 = "battery voltage monitoring"
-
-        sim_12 = hybrid_retriever._content_similarity(text1, text2)
-        sim_13 = hybrid_retriever._content_similarity(text1, text3)
-
-        # text1 and text2 should be more similar than text1 and text3
-        assert sim_12 > sim_13
-        assert 0.0 <= sim_12 <= 1.0
-        assert 0.0 <= sim_13 <= 1.0
 
 
 class TestRetrieveMethod:

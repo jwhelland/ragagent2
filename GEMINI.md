@@ -29,12 +29,12 @@ All commands should be run using `uv run`.
 -   **Discover:** `uv run ragagent-discover` (Find entity candidates).
 -   **Review:** `uv run ragagent-review` (Interactive TUI for curation).
 -   **Interactive Review (Alternative):** `uv run ragagent-review-interactive`
+-   **Query:** `uv run ragagent-query` (Interactive CLI for RAG queries).
 
 ### Development
 -   **Test:** `uv run pytest` (Runs all tests with coverage).
 -   **Format:** `uv run black src/ tests/`
 -   **Lint:** `uv run ruff check src/ tests/`
--   **Type Check:** `uv run mypy src/`
 
 ## Project Structure
 -   **`src/`**: Core logic.
@@ -58,7 +58,7 @@ All commands should be run using `uv run`.
 
 ## Development Conventions
 -   **Style:** Follow Black/Ruff standards.
--   **Typing:** Strict type hints (`mypy` enabled). Use Pydantic models for data structures.
+-   **Typing:** Strict type hints. Use Pydantic models for data structures.
 -   **Testing:** Mock external services (Neo4j, Qdrant, LLM) in unit tests. Coverage is tracked.
 -   **Architecture:** Logic should be modular and injectable. Avoid side effects in core logic modules.
 -   **Imports:** Use absolute imports (e.g., `from src.utils import ...`).
