@@ -1,7 +1,7 @@
 [project]
 name = "ragagent2"
 version = "0.1.0"
-description = "A Graph RAG system for satellite technical documents with hybrid retrieval"
+description = "A Graph RAG system for technical documents with hybrid retrieval"
 readme = "README.md"
 requires-python = ">=3.12.1"
 authors = [
@@ -40,6 +40,9 @@ dependencies = [
     "PyYAML>=6.0",
     # CLI and Utilities
     "loguru>=0.7.2",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "textual>=0.47.0",
     # Testing
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
@@ -57,12 +60,14 @@ dev = [
     "mypy>=1.7.0",
     "ipython>=8.18.0",
     "jupyter>=1.0.0",
+    "pytest-asyncio>=0.21.0",
 ]
 
 [project.scripts]
 ragagent-ingest = "scripts.ingest_documents:main"
 ragagent-discover = "scripts.run_discovery:main"
 ragagent-review = "scripts.review_entities:main"
+ragagent-review-interactive = "scripts.review_entities_interactive:main"
 ragagent-setup = "scripts.setup_databases:main"
 
 [build-system]

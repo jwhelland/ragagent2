@@ -1,6 +1,6 @@
-# Graph RAG System for Satellite Technical Documents
+# Graph RAG System for Technical Documents
 
-A comprehensive Graph RAG (Retrieval-Augmented Generation) system designed to process and query 100-500 satellite technical documents and standard operating procedures. The system combines vector similarity search with knowledge graph traversal to enable complex queries across technical documentation.
+A comprehensive Graph RAG (Retrieval-Augmented Generation) system designed to process and query 100-500 technical documents and standard operating procedures. The system combines vector similarity search with knowledge graph traversal to enable complex queries across technical documentation.
 
 ## Features
 

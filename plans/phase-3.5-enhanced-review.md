@@ -364,25 +364,178 @@ scripts/
 **Priority:** Medium
 **Dependencies:** Task 3.5.2, Task 3.5.4
 
+**Overview:**
+Implement multi-select capabilities and batch operations for efficient large-scale curation. Includes visual selection mode, batch approve/reject with preview, and a comprehensive merge workflow for deduplicating entity candidates.
+
 **Subtasks:**
-1. Implement visual selection mode (`v` key)
-2. Add multi-candidate selection UI
-3. Create batch operation preview
-4. Implement batch approve/reject
-5. Add merge workflow UI
-6. Create rollback mechanism
-7. Add dry-run mode for batch operations
+
+1. **Implement visual selection mode (`v` key)**
+   - Add `selection_mode` reactive state to track when in selection mode
+   - Add `selected_candidate_ids` set to track selected candidates
+   - Toggle selection mode with 'v' key
+   - Update subtitle to show selection count when in selection mode
+   - Show instructional notification on entering selection mode
+
+2. **Add multi-candidate selection UI**
+   - Add checkbox indicators `[✓]` / `[ ]` to CandidateRow
+   - Checkboxes appear before navigation cursor `►`
+   - Space key toggles selection of current candidate
+   - Ctrl+A to select all visible candidates
+   - Ctrl+D to deselect all candidates
+   - Visual feedback for selection/deselection actions
+
+3. **Create batch operation preview modals**
+   - `BatchOperationModal` for approve/reject preview
+   - Shows operation type with visual indicator (✓/✗)
+   - Displays list of affected candidates with scrolling
+   - Shows summary: "Will {operation} X candidates"
+   - Reminds user about undo capability
+   - Confirm (Enter) / Cancel (Escape) options
+
+4. **Implement batch approve operation**
+   - Wire up to `BatchCurationService.batch_approve()`
+   - Run in worker thread with `@work(thread=True)`
+   - Create checkpoint before operation for rollback
+   - Update session statistics (approved count)
+   - Clear selection after successful operation
+   - Show success notification with count
+   - Handle errors with rollback and notification
+
+5. **Implement batch reject operation**
+   - Manual loop through selected candidates
+   - Create checkpoint before operation for rollback
+   - Call `reject_candidate()` for each PENDING candidate
+   - Update session statistics (rejected count)
+   - Clear selection after successful operation
+   - Show success notification with count
+   - Rollback all changes on error
+
+6. **Add merge workflow UI (candidate-to-candidate)**
+   - **Primary Selection Modal** (`PrimarySelectionModal`)
+     - Shows all selected candidates
+     - Radio buttons to choose primary candidate
+     - Displays key info: name, type, confidence, mentions, description preview
+     - Default selection: highest confidence score
+     - Clear visual distinction of primary candidate
+     - [Select Primary] and [Cancel] buttons
+
+   - **Merge Preview Modal** (`MergePreviewModal`)
+     - **Primary section**: Shows chosen primary (highlighted, marked with •)
+     - **Duplicates section**: Shows candidates to be merged and rejected
+     - **Merged Result Preview**:
+       - Canonical name (from primary)
+       - Entity type (from primary)
+       - Aliases (union of all aliases from all candidates)
+       - Description (primary's description, fallback to first with description)
+       - Confidence (maximum across all candidates)
+       - Mention count (sum across all candidates)
+       - Source documents (union of all sources)
+     - [Change Primary] button returns to primary selection
+     - [Confirm Merge] and [Cancel] buttons
+
+   - **Workflow Steps**:
+     1. User selects 2+ PENDING candidates in selection mode
+     2. User presses 'M' key
+     3. Validation: minimum 2 candidates, filter non-PENDING
+     4. If type conflicts exist: show warning but allow continuation
+     5. Show PrimarySelectionModal with auto-selected primary
+     6. Show MergePreviewModal with detailed merge preview
+     7. On confirm: execute merge via `batch_merge_clusters()`
+     8. Update statistics, clear selection, reload candidates
+
+7. **Implement merge operation backend integration**
+   - Wire up to `BatchCurationService.batch_merge_clusters()`
+   - Run in worker thread with `@work(thread=True)`
+   - Pass candidates as cluster: `[[primary, ...duplicates]]`
+   - Checkpoint/rollback support via BatchCurationService
+   - Record merge in session statistics
+   - Clear selection after successful merge
+   - Show success notification with merged entity name
+
+8. **Add keybindings for batch operations**
+   - `v` - Toggle selection mode
+   - `Space` - Toggle selection of current candidate (in selection mode)
+   - `Ctrl+A` - Select all visible candidates
+   - `Ctrl+D` - Deselect all candidates
+   - `A` (capital) - Batch approve selected candidates
+   - `R` (capital) - Batch reject selected candidates
+   - `M` (capital) - Merge selected candidates
+
+9. **Error handling and validation**
+   - Minimum 2 candidates for merge
+   - Filter out non-PENDING candidates with warning
+   - Type conflict warnings (allow but warn)
+   - Already approved/rejected warnings
+   - Graceful handling of backend errors with rollback
+   - User-friendly error messages
+
+**Merge Workflow Implementation Details:**
+
+**What Gets Merged:**
+- ✅ **Aliases**: All unique aliases from all candidates
+- ✅ **Source Documents**: Union of all source documents
+- ✅ **Chunk IDs**: Union of all chunk IDs
+- ✅ **Mention Count**: Sum of all mention counts
+- ✅ **Confidence**: Maximum confidence score
+- ✅ **Description**: Primary's description (fallback to first duplicate with description)
+- ✅ **Provenance**: Merged candidate keys stored in entity properties
+- ✅ **Normalization Table**: All aliases map to primary's canonical name
+- ✅ **Relationships**: RelationshipCandidates involving merged aliases get promoted
+
+**Candidate Status Updates:**
+- Primary candidate → `APPROVED`
+- Duplicate candidates → `REJECTED`
+- New Entity created with `EntityStatus.APPROVED`
+
+**Undo Support:**
+- Full rollback via checkpoint system
+- Restores all candidate statuses
+- Deletes created entity
+- Restores normalization table entries
+- Accessible via 'u' key after merge
 
 **Deliverables:**
-- Visual mode for multi-select
-- Batch operation preview and execution
-- Safe rollback mechanism
+- Visual selection mode with checkbox indicators
+- Batch approve/reject with preview modals
+- Complete merge workflow with primary selection
+- Safe rollback mechanism for all batch operations
+- Comprehensive keybindings
 
 **Acceptance Criteria:**
-- Can select multiple candidates visually
-- Preview shows what will happen
-- Batch operations respect confirmation
-- Can undo batch operations
+- ✓ Can select multiple candidates visually with Space key
+- ✓ Checkboxes show selected state
+- ✓ Selection count shown in subtitle
+- ✓ Batch approve preview shows affected candidates
+- ✓ Batch reject preview shows affected candidates
+- ✓ Primary selection modal shows all candidates with key info
+- ✓ Merge preview shows detailed merged result
+- ✓ Can change primary candidate before confirming
+- ✓ Merge creates entity with merged aliases and metadata
+- ✓ All batch operations respect confirmation step
+- ✓ Can undo all batch operations
+- ✓ Selection automatically cleared after operations
+- ✓ Session statistics updated correctly
+- ✓ Type conflicts warned but allowed
+- ✓ Minimum 2 candidates enforced for merge
+- ✓ Non-PENDING candidates filtered with warning
+
+**Testing Checklist:**
+- [ ] Select 2 candidates, press 'v', Space on each, confirm checkboxes appear
+- [ ] Press 'A', confirm preview shows both candidates, confirm approval works
+- [ ] Press 'R', confirm preview shows both candidates, confirm rejection works
+- [ ] Select 3 candidates, press 'M', confirm primary selection modal appears
+- [ ] Choose different primary, confirm merge preview updates
+- [ ] Confirm merge, verify entity created with all aliases
+- [ ] Press 'u', verify merge undone and candidates restored
+- [ ] Select candidates with different types, confirm warning shown
+- [ ] Try merge with 1 candidate, confirm error message
+- [ ] Try merge with already approved candidate, confirm filtered with warning
+
+**Future Enhancements (Phase 5):**
+- Merge candidates into existing entities (not just candidate-to-candidate)
+- Entity search and selection for merge targets
+- Cross-entity merge preview and validation
+- See Phase 5 Task 5.3 for details
 
 ---
 
@@ -1337,7 +1490,19 @@ Both solutions address the core problem of scaling entity review, but the enhanc
 
 **Next Phase:** [Phase 4 - Retrieval System](phase-4-retrieval-system.md)
 
-**Document Version:** 1.0
-**Last Updated:** 2025-12-21
-**Status:** Draft for Review
-**Next Steps:** Begin implementation with Option 1 (Enhanced CLI)
+---
+
+## Deferred Items (Moved to Phase 6)
+
+The following "Advanced Features" were deferred during Phase 3.5 implementation to prioritize core stability. They have been moved to [Phase 6 - Discovery & Polish](phase-6-discovery-polish.md).
+
+1.  **Flagging System:** Requires schema update to support `CandidateStatus.FLAGGED` or a dedicated property. Currently shows "Coming Soon".
+2.  **Sort Command (`:sort`):** Parser works, but backend implementation pending.
+3.  **Export Command (`:export`):** Parser works, but export logic pending.
+4.  **Help Screen (`?`):** Placeholder notification currently shown.
+5.  **Comparison Actions:** "Select different candidates" logic pending.
+
+**Document Version:** 1.1
+**Last Updated:** 2025-12-22
+**Status:** Completed
+**Next Steps:** Proceed to Phase 4 (Retrieval System)

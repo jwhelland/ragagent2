@@ -97,16 +97,16 @@ This is the master task tracking document for the Graph RAG system implementatio
 
 ### Option 1: Enhanced Interactive CLI (1 week)
 
-- [ ] **3.5.1** Interactive TUI Foundation ⚠️ CRITICAL
-- [ ] **3.5.2** Candidate List Widget ⚠️ CRITICAL
-- [ ] **3.5.3** Detail Panel Widget
-- [ ] **3.5.4** Single-Key Actions ⚠️ CRITICAL
-- [ ] **3.5.5** Edit Modal
-- [ ] **3.5.6** Search and Filter System
-- [ ] **3.5.7** Progress Tracking and Statistics
-- [ ] **3.5.8** Batch Operations UI
-- [ ] **3.5.9** Vim-Style Command Mode
-- [ ] **3.5.10** Advanced Features
+- [x] **3.5.1** Interactive TUI Foundation ⚠️ CRITICAL
+- [x] **3.5.2** Candidate List Widget ⚠️ CRITICAL
+- [x] **3.5.3** Detail Panel Widget
+- [x] **3.5.4** Single-Key Actions ⚠️ CRITICAL
+- [x] **3.5.5** Edit Modal
+- [x] **3.5.6** Search and Filter System
+- [x] **3.5.7** Progress Tracking and Statistics
+- [x] **3.5.8** Batch Operations UI
+- [x] **3.5.9** Vim-Style Command Mode
+- [x] **3.5.10** Advanced Features (Core features implemented; Flag/Sort/Export moved to Phase 6)
 
 ### Option 2: Web Interface (Optional - Future)
 
@@ -119,7 +119,6 @@ This is the master task tracking document for the Graph RAG system implementatio
 - [ ] **3.5.17** Dashboard and Statistics
 - [ ] **3.5.18** Batch Operations UI
 - [ ] **3.5.19** WebSocket Real-Time Updates
-- [ ] **3.5.20** Mobile Optimization and Gestures
 
 **Phase 3.5 Deliverables (Option 1):**
 - Interactive terminal-based review interface
@@ -195,6 +194,10 @@ This is the master task tracking document for the Graph RAG system implementatio
 - [ ] **6.6** Entity Discovery Report Generator
 - [ ] **6.7** Demo and Example Workflows
 - [ ] **6.8** Final Integration and Testing ⚠️ CRITICAL
+- [ ] **6.9** UI Polish: Flagging System Implementation (Schema + UI)
+- [ ] **6.10** UI Polish: Sort Command Implementation
+- [ ] **6.11** UI Polish: Export Command Implementation
+- [ ] **6.12** UI Polish: Help Screen Implementation
 
 **Phase 6 Deliverables:**
 - Comprehensive test suite with >80% coverage
@@ -204,6 +207,7 @@ This is the master task tracking document for the Graph RAG system implementatio
 - Deployment scripts and configuration
 - Demo materials and example workflows
 - Final integration validation
+- Completed "Advanced Features" for Interactive CLI
 
 ---
 
@@ -246,17 +250,17 @@ These tasks are on the critical path and must be completed for project success:
 ## Progress Summary
 
 ### Overall Progress
-- **Phase 1:** ☑ 10/10 tasks complete
-- **Phase 2:** ☑ 6/6 tasks complete
-- **Phase 3:** ☑ 9/9 tasks complete
-- **Phase 3.5 (Option 1):** ☐ 0/10 tasks complete
-- **Phase 3.5 (Option 2):** ☐ 0/10 tasks complete (optional)
-- **Phase 4:** ☐ 4/8 tasks complete
-- **Phase 5:** ☐ 0/5 tasks complete
-- **Phase 6:** ☐ 0/8 tasks complete
+- **Phase 1:** ☑ 10/10 tasks complete (100%)
+- **Phase 2:** ☑ 6/6 tasks complete (100%)
+- **Phase 3:** ☑ 9/9 tasks complete (100%)
+- **Phase 3.5 (Option 1):** ☑ 10/10 tasks complete (100%)
+- **Phase 3.5 (Option 2):** ☐ 0/10 tasks complete (optional, not planned)
+- **Phase 4:** ☑ 4/8 tasks complete (50%)
+- **Phase 5:** ☐ 0/5 tasks complete (0%)
+- **Phase 6:** ☐ 0/12 tasks complete (0%)
 
-**Core System Progress:** 33/50 tasks complete (~66%)
-**Phase 3.5 (Recommended):** 0/10 tasks complete (0%)
+**Core System Progress:** 38/54 tasks complete (~70%)
+**Phase 3.5 (Enhanced Review Interface):** ☑ 10/10 tasks complete (100%)
 
 ---
 
@@ -321,5 +325,5 @@ Additional features when needed:
 
 ---
 
-**Last Updated:** 2025-12-21
-**Version:** 1.2 (Moved Enhanced Review Interface from Phase 7 to Phase 3.5)
+**Last Updated:** 2025-12-22
+**Version:** 1.3 (Completed Phase 3.5; Moved UI Polish to Phase 6)

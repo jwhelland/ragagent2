@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from neo4j import GraphDatabase, Session
 from neo4j.exceptions import Neo4jError
+from neo4j.time import Date, DateTime, Time
 
 from src.storage.schemas import (
     CandidateStatus,
@@ -69,6 +70,31 @@ class Neo4jManager:
         except Neo4jError as e:
             logger.error(f"Failed to connect to Neo4j: {e}")
             raise
+
+    @staticmethod
+    def _convert_neo4j_temporals(data: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert Neo4j temporal types to ISO format strings.
+
+        Args:
+            data: Dictionary that may contain Neo4j DateTime, Date, or Time objects
+
+        Returns:
+            Dictionary with temporal objects converted to ISO strings
+        """
+        converted = {}
+        for key, value in data.items():
+            if isinstance(value, (DateTime, Date, Time)):
+                # Convert to ISO format string
+                converted[key] = value.isoformat()
+            elif isinstance(value, list):
+                # Handle lists that might contain temporal objects
+                converted[key] = [
+                    item.isoformat() if isinstance(item, (DateTime, Date, Time)) else item
+                    for item in value
+                ]
+            else:
+                converted[key] = value
+        return converted
 
     def close(self) -> None:
         """Close connection to Neo4j database."""
@@ -361,7 +387,7 @@ class Neo4jManager:
                 limit=limit,
                 offset=offset,
             )
-            return [dict(record["c"]) for record in result]
+            return [self._convert_neo4j_temporals(dict(record["c"])) for record in result]
 
     def get_entity_candidate_statistics(self) -> Dict[str, Any]:
         """Compute basic statistics about EntityCandidate nodes."""
@@ -402,7 +428,7 @@ class Neo4jManager:
                 {"query": query},
             ).single()
 
-            return dict(result["c"]) if result else None
+            return self._convert_neo4j_temporals(dict(result["c"])) if result else None
 
     def search_entity_candidates(self, query: str, *, limit: int = 10) -> List[Dict[str, Any]]:
         """Full-text search EntityCandidate nodes by query string."""
@@ -504,7 +530,7 @@ class Neo4jManager:
                 status=status,
                 limit=limit,
             )
-            return [dict(record["c"]) for record in result]
+            return [self._convert_neo4j_temporals(dict(record["c"])) for record in result]
 
     def update_relationship_candidate_status(
         self, identifier: str, status: CandidateStatus
@@ -624,7 +650,7 @@ class Neo4jManager:
                 limit=limit,
                 offset=offset,
             )
-            return [dict(record["c"]) for record in result]
+            return [self._convert_neo4j_temporals(dict(record["c"])) for record in result]
 
     def drop_schema(self) -> None:
         """Drop all constraints and indexes (use with caution)."""
@@ -1227,7 +1253,7 @@ class Neo4jManager:
             """
 
             result = session.run(query, document_id=document_id, level=level)
-            return [dict(record["c"]) for record in result]
+            return [self._convert_neo4j_temporals(dict(record["c"])) for record in result]
 
     # Graph Traversal Operations
 
