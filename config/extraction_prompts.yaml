@@ -24,6 +24,7 @@ entity_extraction:
     - ANOMALY: failure mode, issue, or mitigation step
     - TABLE: table referenced by number or caption
     - FIGURE: figure referenced by number or caption
+    - ORGANIZATION: company, institution, agency, or research center (e.g., NASA, SpaceX, JPL)
 
     Output JSON schema (apply strictly):
     - Root object with required key "entities".
@@ -218,6 +219,7 @@ output_schemas:
                 - ANOMALY
                 - TABLE
                 - FIGURE
+                - ORGANIZATION
             description: {type: string}
             aliases:
               type: array
@@ -291,6 +293,23 @@ few_shot_examples:
           type: "COMPONENT"
           description: "Solar panel array for power generation"
           aliases: ["solar panels", "photovoltaic array"]
+          confidence: 0.95
+    - text: "NASA's Jet Propulsion Laboratory (JPL) developed the Perseverance rover."
+      entities:
+        - name: "nasa"
+          type: "ORGANIZATION"
+          description: "United States federal agency responsible for the civil space program"
+          aliases: ["National Aeronautics and Space Administration"]
+          confidence: 0.98
+        - name: "jet_propulsion_laboratory"
+          type: "ORGANIZATION"
+          description: "Federally funded research and development center managed by Caltech for NASA"
+          aliases: ["JPL"]
+          confidence: 0.97
+        - name: "perseverance"
+          type: "SYSTEM"
+          description: "Mars rover designed to explore the Jezero crater"
+          aliases: ["Perseverance rover", "Mars 2020"]
           confidence: 0.95
     - text: "Step 3 (Verify Table 2) ensures transponder configuration meets CCSDS uplink standards."
       entities:

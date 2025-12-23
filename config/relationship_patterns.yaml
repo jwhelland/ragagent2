@@ -1,0 +1,53 @@
+# Regex patterns for rule-based relationship extraction
+# Format:
+# - label: Unique identifier for the pattern group
+#   relationship_type: The relationship type to assign (e.g., PART_OF, IS_A)
+#   patterns: List of regex strings.
+#     - Must contain named groups (?P<source>...) and (?P<target>...)
+#     - Use \b for word boundaries
+#     - Case insensitive matching is applied by default
+
+patterns:
+  - label: "hierarchy_is_a"
+    relationship_type: "IS_A"
+    patterns:
+      - "(?P<source>[A-Za-z0-9 _-]+) is a type of (?P<target>[A-Za-z0-9 _-]+)"
+      - "(?P<source>[A-Za-z0-9 _-]+) is a kind of (?P<target>[A-Za-z0-9 _-]+)"
+      - "(?P<target>[A-Za-z0-9 _-]+) such as (?P<source>[A-Za-z0-9 _-]+)"
+      - "(?P<target>[A-Za-z0-9 _-]+),? including (?P<source>[A-Za-z0-9 _-]+)"
+
+  - label: "composition_part_of"
+    relationship_type: "PART_OF"
+    patterns:
+      - "(?P<target>[A-Za-z0-9 _-]+) consists of (?P<source>[A-Za-z0-9 _-]+)"
+      - "(?P<target>[A-Za-z0-9 _-]+) comprises (?P<source>[A-Za-z0-9 _-]+)"
+      - "(?P<target>[A-Za-z0-9 _-]+) is composed of (?P<source>[A-Za-z0-9 _-]+)"
+      - "(?P<source>[A-Za-z0-9 _-]+) is a part of (?P<target>[A-Za-z0-9 _-]+)"
+      - "(?P<source>[A-Za-z0-9 _-]+) is a component of (?P<target>[A-Za-z0-9 _-]+)"
+
+  - label: "functional_contains"
+    relationship_type: "CONTAINS"
+    patterns:
+      - "(?P<source>[A-Za-z0-9 _-]+) contains (?P<target>[A-Za-z0-9 _-]+)"
+      - "(?P<source>[A-Za-z0-9 _-]+) includes (?P<target>[A-Za-z0-9 _-]+)"
+
+  - label: "functional_controls"
+    relationship_type: "CONTROLS"
+    patterns:
+      - "(?P<source>[A-Za-z0-9 _-]+) controls (?P<target>[A-Za-z0-9 _-]+)"
+      - "(?P<source>[A-Za-z0-9 _-]+) regulates (?P<target>[A-Za-z0-9 _-]+)"
+      - "(?P<source>[A-Za-z0-9 _-]+) manages (?P<target>[A-Za-z0-9 _-]+)"
+
+  - label: "functional_monitors"
+    relationship_type: "MONITORS"
+    patterns:
+      - "(?P<source>[A-Za-z0-9 _-]+) monitors (?P<target>[A-Za-z0-9 _-]+)"
+      - "(?P<source>[A-Za-z0-9 _-]+) tracks (?P<target>[A-Za-z0-9 _-]+)"
+      - "(?P<source>[A-Za-z0-9 _-]+) measures (?P<target>[A-Za-z0-9 _-]+)"
+
+  - label: "functional_powers"
+    relationship_type: "PROVIDES_POWER_TO"
+    patterns:
+      - "(?P<source>[A-Za-z0-9 _-]+) powers (?P<target>[A-Za-z0-9 _-]+)"
+      - "(?P<source>[A-Za-z0-9 _-]+) supplies power to (?P<target>[A-Za-z0-9 _-]+)"
+      - "(?P<source>[A-Za-z0-9 _-]+) energizes (?P<target>[A-Za-z0-9 _-]+)"

@@ -27,9 +27,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.extraction.llm_extractor import LLMExtractedEntity
-from src.extraction.spacy_extractor import ExtractedEntity
-from src.normalization import StringNormalizer
+from src.extraction.models import ExtractedEntity
+from src.normalization.string_normalizer import StringNormalizer
 
 
 class SourceAttribution(BaseModel):
@@ -96,16 +95,16 @@ class _CandidateAccumulator:
     def add_spacy(self, entity: ExtractedEntity, *, weight: float) -> None:
         """Add spaCy evidence."""
         self._ensure_document(entity.document_id)
-        self._add_alias(entity.text)
-        self._record_type(entity.label, weight * _clamp(entity.confidence), source="spacy")
+        self._add_alias(entity.name)
+        self._record_type(entity.type, weight * _clamp(entity.confidence), source="spacy")
         self._record_confidence(source="spacy", confidence=weight * _clamp(entity.confidence))
 
         self.provenance.append(
             SourceAttribution(
                 extractor="spacy",
-                raw_type=entity.label,
+                raw_type=entity.type,
                 confidence=_clamp(entity.confidence),
-                text=entity.text,
+                text=entity.name,
                 sentence=entity.sentence,
                 context=entity.context,
                 start_char=entity.start_char,
@@ -114,7 +113,7 @@ class _CandidateAccumulator:
             )
         )
 
-    def add_llm(self, entity: LLMExtractedEntity, *, weight: float) -> None:
+    def add_llm(self, entity: ExtractedEntity, *, weight: float) -> None:
         """Add LLM evidence."""
         self._ensure_document(entity.document_id)
         self._prefer_canonical(entity.name)
@@ -219,18 +218,18 @@ class EntityMerger:
     def merge(
         self,
         spacy_entities: Optional[Iterable[ExtractedEntity]] = None,
-        llm_entities: Optional[Iterable[LLMExtractedEntity]] = None,
+        llm_entities: Optional[Iterable[ExtractedEntity]] = None,
     ) -> List[MergedEntityCandidate]:
         """Merge entities from both extractors into unified candidates."""
         accumulators: Dict[Tuple[str, str], _CandidateAccumulator] = {}
 
         for ent in spacy_entities or []:
-            if self._is_filtered(ent.label):
+            if self._is_filtered(ent.type):
                 continue
-            key = self._match_key(accumulators, ent.text, ent.chunk_id, alias_norms=set())
+            key = self._match_key(accumulators, ent.name, ent.chunk_id, alias_norms=set())
             acc = accumulators.setdefault(
                 key,
-                _CandidateAccumulator(ent.text, ent.chunk_id, ent.document_id, self.normalizer),
+                _CandidateAccumulator(ent.name, ent.chunk_id, ent.document_id, self.normalizer),
             )
             acc.add_spacy(ent, weight=self.source_weights["spacy"])
 

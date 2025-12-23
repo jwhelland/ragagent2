@@ -73,7 +73,7 @@ extraction:
     - ANOMALY
     - TABLE
     - FIGURE
-    - ORG
+    - ORGANIZATION
 
   relationship_types:
     - PART_OF

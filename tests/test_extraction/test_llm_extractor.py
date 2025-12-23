@@ -5,10 +5,9 @@ from typing import Dict
 import pytest
 
 from src.extraction.llm_extractor import (
-    LLMExtractedEntity,
-    LLMExtractedRelationship,
     LLMExtractor,
 )
+from src.extraction.models import ExtractedEntity, ExtractedRelationship
 from src.utils.config import LLMConfig
 
 
@@ -98,7 +97,7 @@ def test_llm_extractor_parses_relationships(monkeypatch: pytest.MonkeyPatch) -> 
     }
 
     known_entities = [
-        LLMExtractedEntity(
+        ExtractedEntity(
             name="battery", type="COMPONENT", description="", aliases=[], confidence=0.9
         ),
         {"name": "solar_array", "type": "COMPONENT"},

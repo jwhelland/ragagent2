@@ -314,11 +314,26 @@ class QueryParser:
         requires_graph = self._requires_graph_traversal(intent, relationship_types, normalized)
         max_depth = self._determine_max_depth(normalized) if requires_graph else None
 
+        # Proactive query expansion for retrieval:
+        # Add expanded terms to keywords and potentially normalized text
+        all_expansions = []
+        for term, expansions in expanded_terms.items():
+            for exp in expansions:
+                if exp.lower() not in keywords:
+                    keywords.append(exp.lower())
+                all_expansions.append(exp)
+        
+        # If we have expansions, create an enriched version of normalized text for vector search
+        if all_expansions:
+            enriched_text = normalized + " " + " ".join(all_expansions)
+        else:
+            enriched_text = normalized
+
         # Create parsed query
         parsed = ParsedQuery(
             query_id=query_id,
             original_text=query_text,
-            normalized_text=normalized,
+            normalized_text=enriched_text,
             intent=intent,
             intent_confidence=intent_confidence,
             entity_mentions=entity_mentions,
@@ -488,7 +503,7 @@ class QueryParser:
             EntityType if mapping exists, None otherwise
         """
         mapping = {
-            "ORG": EntityType.SYSTEM,
+            "ORG": EntityType.ORGANIZATION,
             "PRODUCT": EntityType.COMPONENT,
             "GPE": None,  # Geopolitical entity, not relevant
             "PERSON": None,
@@ -799,7 +814,7 @@ class QueryParser:
             Tuple of (is_valid, error_message)
         """
         # Check if query is too short
-        if len(parsed.normalized_text.split()) < 2:
+        if len(parsed.original_text.split()) < 2:
             return False, "Query is too short (minimum 2 words)"
 
         # Check if intent confidence is too low

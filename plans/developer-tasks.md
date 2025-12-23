@@ -48,12 +48,12 @@ This is the master task tracking document for the Graph RAG system implementatio
 
 ## Phase 2: Entity Extraction (Weeks 3-4)
 
-**Focus:** spaCy NER, LLM integration, entity/relationship extraction, candidate storage
+**Focus:** spaCy NER, LLM integration, entity/relationship extraction, entity merging, candidate storage
 
 - [x] **2.1** spaCy NER Pipeline Setup
 - [x] **2.2** LLM Integration (Anthropic and OpenAI)
 - [x] **2.3** Entity and Relationship Prompt Engineering
-- [x] **2.4** Entity Merger
+- [x] **2.4** Entity Merger (Exact/Alias Matching)
 - [x] **2.5** Entity Candidate Database
 - [x] **2.6** Extraction Pipeline Orchestration
 
@@ -90,7 +90,8 @@ This is the master task tracking document for the Graph RAG system implementatio
 - [x] **3.1** String Normalization
 - [x] **3.2** Fuzzy String Matching
 - [x] **3.3** Acronym Resolution System
-- [x] **3.4** Entity Deduplication with Embeddings
+- [x] **3.4** Entity Deduplication with Embeddings (Suggestions)
+- [x] **3.4b** Automatic Deduplication Enforcement (Pipeline Integration)
 - [x] **3.5** Normalization Table Implementation
 - [x] **3.6** CLI Review Interface - Core
 - [x] **3.7** Entity Curation Operations
@@ -100,6 +101,7 @@ This is the master task tracking document for the Graph RAG system implementatio
 **Phase 3 Deliverables:**
 - String normalization and fuzzy matching
 - Embedding-based deduplication
+- Automatic semantic merging during ingestion
 - Normalization table for entity mapping
 - CLI review interface
 - Curation operations (approve, merge, reject, edit)
@@ -273,14 +275,14 @@ These tasks are on the critical path and must be completed for project success:
 - **Phase 1:** ☑ 10/10 tasks complete (100%)
 - **Phase 2:** ☑ 6/6 tasks complete (100%)
 - **Phase 2.1:** ☐ 0/4 tasks complete (0%)
-- **Phase 3:** ☑ 9/9 tasks complete (100%)
+- **Phase 3:** ☑ 9/10 tasks complete (90%)
 - **Phase 3.5 (Option 1):** ☑ 10/10 tasks complete (100%)
 - **Phase 3.5 (Option 2):** ☐ 0/10 tasks complete (optional, not planned)
 - **Phase 4:** ☑ 8/8 tasks complete (100%)
 - **Phase 5:** ☑ 6/6 tasks complete (100%)
 - **Phase 6:** ☐ 4/12 tasks complete (~33%)
 
-**Core System Progress:** 53/65 tasks complete (~81.5%)
+**Core System Progress:** 53/66 tasks complete (~80%)
 **Phase 3.5 (Enhanced Review Interface):** ☑ 10/10 tasks complete (100%)
 
 ---
@@ -346,5 +348,5 @@ Additional features when needed:
 
 ---
 
-**Last Updated:** 2025-12-22
-**Version:** 1.4 (Completed Phase 4)
+**Last Updated:** 2025-12-23
+**Version:** 1.5 (Added Task 3.4b)

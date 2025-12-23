@@ -23,11 +23,14 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from src.extraction import EntityMerger, LLMExtractor, SpacyExtractor
+from src.extraction.dependency_extractor import DependencyRelationshipExtractor
+from src.extraction.pattern_extractor import PatternRelationshipExtractor
+from src.extraction.cooccurrence_extractor import CooccurrenceRelationshipExtractor
 from src.ingestion.chunker import HierarchicalChunker
 from src.ingestion.pdf_parser import ParsedDocument
 from src.ingestion.text_cleaner import TextCleaner
 from src.ingestion.text_rewriter import TextRewriter
-from src.normalization import EntityDeduplicator, EntityRecord, StringNormalizer
+from src.normalization import EntityDeduplicator, EntityRecord, MergeSuggestion, StringNormalizer
 from src.storage.neo4j_manager import Neo4jManager
 from src.storage.qdrant_manager import QdrantManager
 from src.storage.schemas import (
@@ -151,6 +154,9 @@ class IngestionPipeline:
         self.neo4j_manager: Neo4jManager | None = None
         self.qdrant_manager: QdrantManager | None = None
         self.spacy_extractor: SpacyExtractor | None = None
+        self.pattern_extractor: PatternRelationshipExtractor | None = None
+        self.dependency_extractor: DependencyRelationshipExtractor | None = None
+        self.cooccurrence_extractor: CooccurrenceRelationshipExtractor | None = None
         self.llm_extractor: LLMExtractor | None = None
         self.entity_merger: EntityMerger | None = None
         self.string_normalizer: StringNormalizer | None = None
@@ -229,6 +235,29 @@ class IngestionPipeline:
                     "spaCy extractor initialization failed; continuing without spaCy extraction",
                     error=str(exc),
                 )
+
+        if self.pattern_extractor is None:
+            try:
+                self.pattern_extractor = PatternRelationshipExtractor()
+            except Exception as exc:
+                logger.warning(
+                    "Pattern extractor initialization failed",
+                    error=str(exc)
+                )
+
+        if self.dependency_extractor is None:
+            try:
+                # Reuse spaCy NLP if available to save memory
+                nlp = self.spacy_extractor.nlp if self.spacy_extractor else None
+                self.dependency_extractor = DependencyRelationshipExtractor(nlp=nlp)
+            except Exception as exc:
+                logger.warning(
+                    "Dependency extractor initialization failed",
+                    error=str(exc)
+                )
+
+        if self.cooccurrence_extractor is None:
+            self.cooccurrence_extractor = CooccurrenceRelationshipExtractor()
 
         if self.llm_extractor is None and self.config.extraction.enable_llm:
             try:
@@ -429,6 +458,10 @@ class IngestionPipeline:
             if self.config.extraction.enable_llm and self.llm_extractor:
                 logger.debug("Step 4c: Extracting relationships with LLM")
                 llm_relationships_created = self._extract_llm_relationships(chunks, progress)
+
+            # Step 4c.2: Extract rule-based relationships (Pattern + Dependency)
+            logger.debug("Step 4c.2: Extracting rule-based relationships")
+            self._extract_rule_based_relationships(chunks, progress)
 
             # Step 4d: Merge entities across extractors
             logger.debug("Step 4d: Merging extracted entities")
@@ -645,7 +678,9 @@ class IngestionPipeline:
                         if alias not in record["aliases"]:
                             record["aliases"].append(alias)
                     if not record["description"] and description:
-                        record["description"] = description
+                        # Keep longest description
+                        if len(description) > len(record["description"]):
+                            record["description"] = description
                 else:
                     aggregated[candidate_key] = {
                         "entity_id": candidate_key,
@@ -666,6 +701,17 @@ class IngestionPipeline:
             logger.warning("Deduplication failed", error=str(exc))
             return 0
 
+        # Step 1: Handle Auto-Merges
+        auto_merge_suggestions = [s for s in result.merge_suggestions if s.auto_merge]
+        if auto_merge_suggestions:
+            merges_performed = self._perform_auto_merges(chunks, auto_merge_suggestions)
+            if merges_performed > 0:
+                logger.info(f"Automatically merged {merges_performed} duplicate entities")
+                # Recursive call to re-deduplicate the now-cleaner set of entities.
+                # This ensures remaining suggestions are valid for the new entities.
+                return self._deduplicate_merged_entities(chunks)
+
+        # Step 2: Store suggestions for manual review
         suggestions_by_key: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
         for suggestion in result.merge_suggestions:
             payload = suggestion.model_dump()
@@ -700,6 +746,186 @@ class IngestionPipeline:
         )
 
         return suggestion_count
+
+    def _perform_auto_merges(
+        self, chunks: List[Any], suggestions: List[MergeSuggestion]
+    ) -> int:
+        """Execute automatic merges on the chunks in-place."""
+        if not suggestions:
+            return 0
+
+        # 1. Identify connected components (merge groups)
+        parent: Dict[str, str] = {}
+
+        def find(i: str) -> str:
+            if i not in parent:
+                parent[i] = i
+            if parent[i] != i:
+                parent[i] = find(parent[i])
+            return parent[i]
+
+        def union(i: str, j: str) -> None:
+            root_i = find(i)
+            root_j = find(j)
+            if root_i != root_j:
+                parent[root_i] = root_j
+
+        involved_keys = set()
+        for s in suggestions:
+            union(s.source_id, s.target_id)
+            involved_keys.add(s.source_id)
+            involved_keys.add(s.target_id)
+
+        # 2. Gather stats to pick survivors
+        candidate_stats: Dict[str, Dict[str, Any]] = {}
+        for chunk in chunks:
+            merged = chunk.metadata.get("merged_entities") or []
+            for cand in merged:
+                key = cand.get("candidate_key")
+                if key and key in involved_keys:
+                    if key not in candidate_stats:
+                        candidate_stats[key] = {
+                            "canonical_name": cand.get("canonical_name"),
+                            "mention_count": 0,
+                            "type": cand.get("type"),
+                            "key": key,
+                        }
+                    candidate_stats[key]["mention_count"] += int(cand.get("mention_count", 1))
+
+        # 3. Determine survivor for each group
+        groups: DefaultDict[str, List[str]] = defaultdict(list)
+        for key in involved_keys:
+            # Only process keys present in this batch (sanity check)
+            if key in candidate_stats:
+                root = find(key)
+                groups[root].append(key)
+
+        replacement_map: Dict[str, str] = {}  # old_key -> survivor_key
+        
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            
+            # Sort by mention count desc, then name length desc, then lexical
+            survivor_key = sorted(
+                members,
+                key=lambda k: (
+                    candidate_stats[k]["mention_count"],
+                    len(candidate_stats[k]["canonical_name"] or ""),
+                    k,
+                ),
+                reverse=True,
+            )[0]
+
+            for m in members:
+                if m != survivor_key:
+                    replacement_map[m] = survivor_key
+
+        if not replacement_map:
+            return 0
+
+        # 4. Aggregate data into survivor records
+        merged_data_cache: Dict[str, Dict[str, Any]] = {}
+
+        for chunk in chunks:
+            merged = chunk.metadata.get("merged_entities") or []
+            for cand in merged:
+                key = cand.get("candidate_key")
+                if not key:
+                    continue
+                
+                # Check if this candidate is part of a merge group (either survivor or victim)
+                is_survivor = key in merged_data_cache or (key in involved_keys and key not in replacement_map)
+                is_victim = key in replacement_map
+                
+                if not (is_survivor or is_victim):
+                    continue
+
+                survivor_key = replacement_map.get(key, key)
+                
+                # Initialize survivor record if needed
+                if survivor_key not in merged_data_cache:
+                    base_stats = candidate_stats.get(survivor_key)
+                    if not base_stats:
+                        continue # Should not happen
+
+                    merged_data_cache[survivor_key] = {
+                        "canonical_name": base_stats["canonical_name"],
+                        "canonical_normalized": "", # Will re-normalize if needed
+                        "type": base_stats["type"],
+                        "candidate_key": survivor_key,
+                        "confidence": 0.0,
+                        "aliases": set(),
+                        "description": "",
+                        "mention_count": 0,
+                        "conflicting_types": set(),
+                        "provenance": [],
+                    }
+                
+                target = merged_data_cache[survivor_key]
+                
+                # Merge logic
+                target["confidence"] = max(float(target["confidence"]), float(cand.get("confidence", 0.0)))
+                target["mention_count"] += int(cand.get("mention_count", 1))
+                
+                # Aliases
+                for alias in cand.get("aliases") or []:
+                    if alias:
+                        target["aliases"].add(alias)
+                # Add own canonical name as alias if different from survivor
+                if cand.get("canonical_name") and cand.get("canonical_name") != target["canonical_name"]:
+                     target["aliases"].add(cand.get("canonical_name"))
+
+                # Description (keep longest)
+                desc = str(cand.get("description", ""))
+                if len(desc) > len(str(target["description"])):
+                     target["description"] = desc
+                     
+                # Conflicting types
+                for ct in cand.get("conflicting_types") or []:
+                    target["conflicting_types"].add(ct)
+                # If merging different types, add original type to conflicts
+                if cand.get("type") and cand.get("type") != target["type"]:
+                    target["conflicting_types"].add(cand.get("type"))
+                    
+                # Provenance
+                target["provenance"].extend(cand.get("provenance") or [])
+
+        # 5. Write back to chunks
+        merges_count = len(replacement_map)
+        
+        for chunk in chunks:
+            merged = chunk.metadata.get("merged_entities") or []
+            new_merged = []
+            seen_keys_in_chunk = set()
+            
+            for cand in merged:
+                key = cand.get("candidate_key")
+                
+                # If this candidate is not involved in any merge, keep it
+                if not key or (key not in replacement_map and key not in merged_data_cache):
+                    new_merged.append(cand)
+                    continue
+                
+                # It is involved
+                survivor_key = replacement_map.get(key, key)
+                
+                if survivor_key not in seen_keys_in_chunk:
+                    # Retrieve the fully merged data
+                    if survivor_key in merged_data_cache:
+                        data = merged_data_cache[survivor_key]
+                        
+                        # Convert sets to lists
+                        final_cand = data.copy()
+                        final_cand["aliases"] = list(data["aliases"])
+                        final_cand["conflicting_types"] = list(data["conflicting_types"])
+                        
+                        new_merged.append(final_cand)
+                        seen_keys_in_chunk.add(survivor_key)
+            
+            chunk.metadata["merged_entities"] = new_merged
+            
+        return merges_count
 
     def process_batch(
         self, pdf_paths: List[Path | str], *, force_reingest: bool = False
@@ -880,8 +1106,8 @@ class IngestionPipeline:
             for ent in entities:
                 chunk.metadata["spacy_entities"].append(
                     {
-                        "text": ent.text,
-                        "label": ent.label,
+                        "name": ent.name,
+                        "type": ent.type,
                         "confidence": ent.confidence,
                         "start_char": ent.start_char,
                         "end_char": ent.end_char,
@@ -1055,7 +1281,12 @@ class IngestionPipeline:
         stored = 0
         for chunk in chunks:
             metadata = getattr(chunk, "metadata", {}) or {}
-            rels = metadata.get("llm_relationships") or []
+            
+            # Combine LLM and rule-based relationships
+            rels = []
+            rels.extend(metadata.get("llm_relationships") or [])
+            rels.extend(metadata.get("rule_based_relationships") or [])
+            
             if not rels:
                 continue
 
@@ -1110,6 +1341,52 @@ class IngestionPipeline:
                     )
 
         return stored
+
+    def _extract_rule_based_relationships(
+        self, chunks: List[Any], progress: ExtractionProgress | None = None
+    ) -> int:
+        """Extract relationships using pattern and dependency extractors."""
+        total = 0
+        if self.pattern_extractor:
+            for chunk in chunks:
+                metadata = getattr(chunk, "metadata", {}) or {}
+                rels = self.pattern_extractor.extract_relationships(chunk)
+                if rels:
+                    metadata.setdefault("rule_based_relationships", []).extend([
+                        r.model_dump() for r in rels
+                    ])
+                    total += len(rels)
+                chunk.metadata = metadata
+
+        if self.dependency_extractor:
+            for chunk in chunks:
+                metadata = getattr(chunk, "metadata", {}) or {}
+                rels = self.dependency_extractor.extract_relationships(chunk)
+                if rels:
+                    metadata.setdefault("rule_based_relationships", []).extend([
+                        r.model_dump() for r in rels
+                    ])
+                    total += len(rels)
+                chunk.metadata = metadata
+
+        if self.cooccurrence_extractor:
+            for chunk in chunks:
+                metadata = getattr(chunk, "metadata", {}) or {}
+                known_entities = []
+                known_entities.extend(metadata.get("llm_entities", []))
+                known_entities.extend(metadata.get("spacy_entities", []))
+                
+                rels = self.cooccurrence_extractor.extract_relationships(
+                    chunk, known_entities=known_entities
+                )
+                if rels:
+                    metadata.setdefault("rule_based_relationships", []).extend([
+                        r.model_dump() for r in rels
+                    ])
+                    total += len(rels)
+                chunk.metadata = metadata
+        
+        return total
 
     def _extract_llm_relationships(
         self, chunks: List[Any], progress: ExtractionProgress | None = None

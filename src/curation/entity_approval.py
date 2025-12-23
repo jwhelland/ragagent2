@@ -660,6 +660,7 @@ class EntityCurationService:
                     chunk_id=str(chunk_id) if chunk_id else None,
                     confidence_score=confidence,
                     extracted_text=str(payload.get("extracted_text") or "") or None,
+                    source_extractor=str(payload.get("source_extractor") or "") or None,
                 )
             )
         if provenances:

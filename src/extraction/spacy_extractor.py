@@ -20,29 +20,12 @@ from spacy.pipeline import EntityRuler
 from spacy.tokens import Doc, Span
 from spacy.util import filter_spans
 
+from src.extraction.models import ExtractedEntity
 from src.utils.config import SpacyConfig
 
 # Extend Span with metadata about the match source.
 Span.set_extension("source", default="model", force=True)
 Span.set_extension("is_domain_match", default=False, force=True)
-
-
-class ExtractedEntity(BaseModel):
-    """Structured representation of an extracted entity."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    text: str
-    label: str
-    confidence: float
-    start_char: int
-    end_char: int
-    sentence: str
-    context: str
-    chunk_id: Optional[str] = None
-    document_id: Optional[str] = None
-    source: str = "spacy"
-    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SpacyExtractor:
@@ -221,8 +204,8 @@ class SpacyExtractor:
 
             collected.append(
                 ExtractedEntity(
-                    text=ent.text,
-                    label=ent.label_,
+                    name=ent.text,
+                    type=ent.label_,
                     confidence=confidence,
                     start_char=ent.start_char,
                     end_char=ent.end_char,

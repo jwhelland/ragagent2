@@ -138,6 +138,34 @@ Use embedding similarity to identify semantically similar entities for merging.
 
 ---
 
+## Task 3.4b: Automatic Deduplication Enforcement
+**Priority:** High
+**Dependencies:** Task 3.4, Task 2.6
+
+**Description:**
+Automatically apply semantic deduplication during the ingestion pipeline for high-confidence matches. This ensures that obvious duplicates (e.g., "NASA" and "N.A.S.A.") are merged into a single candidate *before* being stored, keeping the curation queue clean.
+
+**Steps:**
+1. [x] Modify [`src/pipeline/ingestion_pipeline.py`] to process `auto_merge=True` suggestions from `EntityDeduplicator`
+2. [x] Implement in-memory merging logic (similar to `EntityMerger` but for semantic matches)
+3. [x] Consolidate aliases, descriptions, and mention counts for auto-merged candidates
+4. [x] Update `merged_entities` metadata in chunks to reflect the unification
+5. [x] Ensure merged candidates retain full provenance from all original sources
+6. [x] Add logging for all auto-merge actions for audit capability
+
+**Deliverables:**
+- Updated [`src/pipeline/ingestion_pipeline.py`] with auto-merge logic
+- Unit tests for auto-merge scenarios
+- Audit logs for automatic merges
+
+**Acceptance Criteria:**
+- High-confidence semantic duplicates (>0.95) are merged automatically
+- Metadata (aliases, provenance) is preserved from all merged candidates
+- Reduced number of duplicate candidates in Neo4j
+- Zero data loss (no entities dropped without being merged)
+
+---
+
 ## Task 3.5: Normalization Table Implementation
 **Priority:** High  
 **Dependencies:** Task 3.1, Task 3.2, Task 3.3, Task 3.4
@@ -311,6 +339,7 @@ Create pipeline that analyzes entire corpus and generates entity discovery repor
 - Fuzzy matching for variant detection
 - Acronym resolution
 - Embedding-based deduplication
+- Automatic semantic deduplication enforcement
 - Normalization table for entity mapping
 - CLI review interface
 - Curation operations (approve, merge, reject, edit)
@@ -319,6 +348,7 @@ Create pipeline that analyzes entire corpus and generates entity discovery repor
 
 **Success Metrics:**
 - Entity normalization reduces duplicates significantly
+- Automatic semantic deduplication reduces curation workload
 - CLI interface enables efficient manual review
 - Curation operations maintain data quality
 - Discovery pipeline identifies merge opportunities

@@ -41,8 +41,8 @@ def test_spacy_extractor_with_patterns_and_domain_terms(tmp_path: Path) -> None:
     results = extractor.extract_from_chunks([chunk])
     entities = results.get("c1", [])
 
-    assert {e.label for e in entities} == {"SYSTEM", "SUBSYSTEM", "COMPONENT"}
-    assert {e.text for e in entities} == {"system bus", "power subsystem", "motor controller"}
+    assert {e.type for e in entities} == {"SYSTEM", "SUBSYSTEM", "COMPONENT"}
+    assert {e.name for e in entities} == {"system bus", "power subsystem", "motor controller"}
     assert all(0.0 <= e.confidence <= 1.0 for e in entities)
     assert all(e.sentence for e in entities)
     sources = {e.metadata.get("source") if e.metadata else None for e in entities}

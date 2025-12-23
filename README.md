@@ -15,16 +15,6 @@ A comprehensive Graph RAG (Retrieval-Augmented Generation) system designed to pr
 - **Incremental Updates**: Handle document modifications without full reprocessing
 - **Relationship Provenance**: Track where relationships were found with source citations
 
-## Architecture
-
-The system is built in 6 phases:
-1. **Foundation** (Weeks 1-2): PDF parsing, chunking, embedding, basic storage
-2. **Entity Extraction** (Weeks 3-4): spaCy + LLM extraction, entity candidates
-3. **Normalization & Curation** (Weeks 5-6): Entity deduplication, manual review
-4. **Retrieval System** (Weeks 7-8): Hybrid search, query processing, response generation
-5. **Incremental Updates** (Week 9): Document change detection and differential updates
-6. **Discovery & Polish** (Week 10): Entity discovery, testing, deployment
-
 ## Technology Stack
 
 - **Python 3.12+**
@@ -35,13 +25,13 @@ The system is built in 6 phases:
 - **Anthropic/OpenAI** - LLM integration (configurable)
 - **FastEmbed/Sentence Transformers** - Embeddings
 - **Pydantic** - Configuration and validation
-- **Typer** - CLI interface
+- **Typer** and **Textual** - CLI interface
 
 ## Prerequisites
 
 - Python 3.12.1 or higher
 - Docker and Docker Compose (for Neo4j and Qdrant)
-- Anthropic (optional, for local LLM) or OpenAI API key
+- Anthropic or OpenAI API key
 
 ## Installation
 

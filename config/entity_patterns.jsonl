@@ -34,3 +34,9 @@
 {"label":"PROCEDURE","pattern":[{"LOWER":"safe"},{"LOWER":"mode"},{"LOWER":"entry"}]}
 {"label":"PROCEDURE","pattern":[{"LOWER":"antenna"},{"LOWER":"deployment"}]}
 {"label":"PROCEDURE","pattern":[{"LOWER":"reaction"},{"LOWER":"wheel"},{"LOWER":"desaturation"}]}
+{"label":"ORGANIZATION","pattern":[{"LOWER":"nasa"}]}
+{"label":"ORGANIZATION","pattern":[{"LOWER":"jpl"}]}
+{"label":"ORGANIZATION","pattern":[{"LOWER":"spacex"}]}
+{"label":"ORGANIZATION","pattern":[{"LOWER":"caltech"}]}
+{"label":"ORGANIZATION","pattern":[{"LOWER":"jet"},{"LOWER":"propulsion"},{"LOWER":"laboratory"}]}
+{"label":"ORGANIZATION","pattern":[{"LOWER":"california"},{"LOWER":"institute"},{"LOWER":"of"},{"LOWER":"technology"}]}

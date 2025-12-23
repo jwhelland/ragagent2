@@ -7,6 +7,10 @@ from src.curation.interactive.widgets.comparison_modal import ComparisonModalScr
 from src.curation.interactive.widgets.detail_panel import DetailPanel, DetailSection
 from src.curation.interactive.widgets.duplicate_suggestions import DuplicateSuggestionsPanel
 from src.curation.interactive.widgets.edit_modal import EditModalScreen
+from src.curation.interactive.widgets.entity_candidate_merge_preview_modal import (
+    EntityCandidateMergePreviewModal,
+)
+from src.curation.interactive.widgets.entity_search_modal import EntitySearchModal
 from src.curation.interactive.widgets.merge_preview_modal import MergePreviewModal
 from src.curation.interactive.widgets.primary_selection_modal import PrimarySelectionModal
 from src.curation.interactive.widgets.search_modal import SearchFilters, SearchModalScreen
@@ -22,6 +26,8 @@ __all__ = [
     "DetailSection",
     "DuplicateSuggestionsPanel",
     "EditModalScreen",
+    "EntitySearchModal",
+    "EntityCandidateMergePreviewModal",
     "MergePreviewModal",
     "PrimarySelectionModal",
     "SearchFilters",

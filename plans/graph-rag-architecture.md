@@ -25,9 +25,10 @@ graph TB
     subgraph "Processing Layer"
         CHUNK --> NER[spaCy NER<br/>Initial Extraction]
         CHUNK --> LLM[LLM Extractor<br/>Anthropic or OpenAI]
-        NER --> MERGE[Entity Merger]
+        NER --> MERGE[Entity Merger<br/>(Exact/Alias)]
         LLM --> MERGE
-        MERGE --> NORM[Normalization<br/>Engine]
+        MERGE --> DEDUP[Semantic Deduplicator<br/>(Auto-Merge)]
+        DEDUP --> NORM[Normalization<br/>Engine]
         NORM --> REVIEW[Manual Review<br/>Interface]
     end
     
@@ -211,14 +212,15 @@ Rewritten text that is more concise and readable while preserving all critical i
 - Prompt engineering for technical domain
 - Same interface regardless of backend (Anthropic or OpenAI)
 
-**Extraction Flow:**
+**Extraction & Merge Flow:**
 ```mermaid
 graph LR
     CHUNK[Chunk] --> SPACY[spaCy NER]
-    CHUNK --> LLM[LLM Extractor<br/>Anthropic or OpenAI]
-    SPACY --> MERGE[Merge Results]
+    CHUNK --> LLM[LLM Extractor]
+    SPACY --> MERGE[Entity Merger]
     LLM --> MERGE
-    MERGE --> VALID[Validation]
+    MERGE --> DEDUP[Semantic Deduplicator]
+    DEDUP --> VALID[Validation]
     VALID --> STORE[Store Candidates]
 ```
 
@@ -346,15 +348,16 @@ Tables and figures contain critical technical information. By treating them as e
 
 #### 3.2 Entity Deduplication Strategy
 
-1. **Exact Match:** Same canonical name after normalization
-2. **Fuzzy Match:** High string similarity (>90%)
-3. **Embedding Similarity:** High semantic similarity (>0.85)
-4. **Co-occurrence:** Frequently appear in same contexts
+1. **Exact Match:** Same canonical name after normalization (handled by `EntityMerger`).
+2. **Fuzzy Match:** High string similarity (>90%) (handled by `EntityDeduplicator`).
+3. **Embedding Similarity:** High semantic similarity (>0.85).
+4. **Co-occurrence:** Frequently appear in same contexts.
 
 **Merge Decision Logic:**
-- Automatic merge: Exact match + same entity type
-- Suggest for review: Fuzzy/semantic match + same entity type
-- Flag for manual review: Different entity types or low confidence
+- **Exact/Alias Match:** `EntityMerger` combines spaCy/LLM results within chunks.
+- **Automatic Merge (Ingestion):** `IngestionPipeline` enforces semantic deduplication for high-confidence matches (>0.95).
+- **Suggest for Review:** Matches below auto-merge threshold (0.85-0.95) flagged for human curation.
+- **Manual Curation:** Curator resolves low-confidence duplicates or complex conflicts.
 
 ---
 
@@ -694,7 +697,7 @@ final_score = (
 
 2. **Entity Update Strategy:**
    - Extract entities from changed chunks
-   - Compare with existing entities from this document
+   - Compare with existing entities from that document
    - Update mention counts
    - Flag entities unique to deleted chunks for review
 
@@ -882,12 +885,13 @@ ragagent2/
 1. Implement string normalization
 2. Implement fuzzy matching with RapidFuzz
 3. Build acronym resolution system
-4. Implement entity deduplication with embeddings
-5. Create normalization table
-6. Build CLI-based review interface
-7. Implement entity approval/merge/reject operations
-8. Create batch operation tools
-9. Implement feedback loop to production graph
+4. Implement entity deduplication with embeddings (Suggestions)
+5. Implement automatic deduplication enforcement (Ingestion)
+6. Create normalization table
+7. Build CLI-based review interface
+8. Implement entity approval/merge/reject operations
+9. Create batch operation tools
+10. Implement feedback loop to production graph
 
 **Deliverable:** Manual curation workflow for approving entities
 
@@ -1171,6 +1175,7 @@ python scripts/query_system.py "What procedures reference the thermal control sy
 - Mitigation: Use confidence thresholds
 - Mitigation: Require minimum mention count
 - Mitigation: Periodic pruning of unused entities
+- Mitigation: Enforce automatic semantic deduplication during ingestion
 
 **Risk: Slow query performance**
 - Mitigation: Proper indexing in Neo4j and Qdrant

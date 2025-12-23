@@ -24,6 +24,7 @@ class EntityType(str, Enum):
     ANOMALY = "ANOMALY"
     TABLE = "TABLE"
     FIGURE = "FIGURE"
+    ORGANIZATION = "ORGANIZATION"
 
 
 class EntityStatus(str, Enum):
@@ -287,6 +288,14 @@ class Standard(Entity):
     publication_date: Optional[str] = Field(None, description="Publication date")
 
 
+class Organization(Entity):
+    """Company, institution, or agency entity."""
+
+    entity_type: Literal[EntityType.ORGANIZATION] = EntityType.ORGANIZATION
+    headquarters: Optional[str] = Field(None, description="Headquarters location")
+    website: Optional[str] = Field(None, description="Official website URL")
+
+
 class Anomaly(Entity):
     """Known issue or failure mode entity."""
 
@@ -383,6 +392,9 @@ class RelationshipProvenance(BaseModel):
     )
     confidence_score: float = Field(
         default=1.0, ge=0.0, le=1.0, description="Confidence of extraction"
+    )
+    source_extractor: Optional[str] = Field(
+        None, description="Name of the extractor that found this relationship (e.g., spacy_dependency, regex_patterns)"
     )
 
 

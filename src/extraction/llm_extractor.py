@@ -17,40 +17,8 @@ import yaml
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.extraction.models import ExtractedEntity, ExtractedRelationship
 from src.utils.config import LLMConfig
-
-
-class LLMExtractedEntity(BaseModel):
-    """Structured representation of an entity produced by an LLM."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    type: str
-    description: str = ""
-    aliases: List[str] = Field(default_factory=list)
-    confidence: float = 0.0
-    chunk_id: Optional[str] = None
-    document_id: Optional[str] = None
-    source: str = "llm"
-    raw: Dict[str, Any] | None = None
-
-
-class LLMExtractedRelationship(BaseModel):
-    """Structured representation of a relationship produced by an LLM."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    source: str
-    type: str
-    target: str
-    description: str = ""
-    confidence: float = 0.0
-    bidirectional: bool = False
-    chunk_id: Optional[str] = None
-    document_id: Optional[str] = None
-    source_extractor: str = "llm"
-    raw: Dict[str, Any] | None = None
 
 
 class LLMExtractor:
@@ -83,7 +51,7 @@ class LLMExtractor:
         chunk: Any,
         *,
         document_context: Optional[Dict[str, Any]] = None,
-    ) -> List[LLMExtractedEntity]:
+    ) -> List[ExtractedEntity]:
         """Extract entities from a chunk using the configured LLM provider."""
         chunk_text, chunk_id, document_id, metadata = self._coerce_chunk(chunk)
 
@@ -103,7 +71,7 @@ class LLMExtractor:
         *,
         known_entities: Optional[Iterable[Any]] = None,
         document_context: Optional[Dict[str, Any]] = None,
-    ) -> List[LLMExtractedRelationship]:
+    ) -> List[ExtractedRelationship]:
         """Extract relationships from a chunk using the configured LLM provider."""
         chunk_text, chunk_id, document_id, metadata = self._coerce_chunk(chunk)
 
@@ -169,7 +137,7 @@ class LLMExtractor:
         for ent in entities:
             name = ""
             ent_type = ""
-            if isinstance(ent, LLMExtractedEntity):
+            if isinstance(ent, ExtractedEntity):
                 name, ent_type = ent.name, ent.type
             elif isinstance(ent, dict):
                 name = str(
@@ -305,7 +273,7 @@ class LLMExtractor:
     # -----------------------
     def _parse_entities_response(
         self, response_text: str, chunk_id: Optional[str], document_id: Optional[str]
-    ) -> List[LLMExtractedEntity]:
+    ) -> List[ExtractedEntity]:
         data = self._extract_json(response_text)
         if data is None:
             logger.warning("Failed to parse LLM entity response as JSON", chunk_id=chunk_id)
@@ -319,7 +287,7 @@ class LLMExtractor:
             logger.warning("Unexpected entity response structure", chunk_id=chunk_id)
             return []
 
-        entities: List[LLMExtractedEntity] = []
+        entities: List[ExtractedEntity] = []
         for item in raw_entities:
             if not isinstance(item, dict):
                 continue
@@ -342,7 +310,7 @@ class LLMExtractor:
             confidence = self._clamp_confidence(item.get("confidence") or item.get("score"))
 
             entities.append(
-                LLMExtractedEntity(
+                ExtractedEntity(
                     name=name,
                     type=ent_type.upper(),
                     description=description,
@@ -350,6 +318,7 @@ class LLMExtractor:
                     confidence=confidence,
                     chunk_id=chunk_id,
                     document_id=document_id,
+                    source="llm",
                     raw=item,
                 )
             )
@@ -358,7 +327,7 @@ class LLMExtractor:
 
     def _parse_relationships_response(
         self, response_text: str, chunk_id: Optional[str], document_id: Optional[str]
-    ) -> List[LLMExtractedRelationship]:
+    ) -> List[ExtractedRelationship]:
         data = self._extract_json(response_text)
         if data is None:
             logger.warning("Failed to parse LLM relationship response as JSON", chunk_id=chunk_id)
@@ -372,7 +341,7 @@ class LLMExtractor:
             logger.warning("Unexpected relationship response structure", chunk_id=chunk_id)
             return []
 
-        relationships: List[LLMExtractedRelationship] = []
+        relationships: List[ExtractedRelationship] = []
         for item in raw_relationships:
             if not isinstance(item, dict):
                 continue
@@ -388,7 +357,7 @@ class LLMExtractor:
             bidirectional = bool(item.get("bidirectional", False))
 
             relationships.append(
-                LLMExtractedRelationship(
+                ExtractedRelationship(
                     source=source,
                     target=target,
                     type=rel_type.upper(),
@@ -397,6 +366,7 @@ class LLMExtractor:
                     bidirectional=bidirectional,
                     chunk_id=chunk_id,
                     document_id=document_id,
+                    source_extractor="llm",
                     raw=item,
                 )
             )

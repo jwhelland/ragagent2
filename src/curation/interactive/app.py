@@ -1,7 +1,7 @@
 """Main Textual application for interactive entity candidate review."""
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from textual import work
@@ -952,6 +952,71 @@ class ReviewApp(App):
         else:
             # User cancelled the edit
             self.notify("Edit cancelled", severity="information")
+
+    def action_merge_into_entity(self) -> None:
+        """Handle merge into existing entity action (bound to 'Shift+M' key)."""
+        if not self.current_candidate:
+            self.notify("No candidate selected", severity="warning")
+            return
+
+        if self.current_candidate.status != CandidateStatus.PENDING:
+            self.notify("Can only merge PENDING candidates", severity="warning")
+            return
+
+        # Open search modal to find target entity
+        def on_entity_selected(entity_data: Optional[Dict[str, Any]]) -> None:
+            if entity_data:
+                self._handle_merge_entity_search_result(entity_data)
+
+        self.push_screen(
+            EntitySearchModal(self.config, initial_query=self.current_candidate.canonical_name),
+            on_entity_selected
+        )
+
+    def _handle_merge_entity_search_result(self, entity_data: Dict[str, Any]) -> None:
+        """Handle selected target entity from search."""
+        candidate = self.current_candidate
+        
+        def on_confirm(confirmed: bool) -> None:
+            if confirmed:
+                self.merge_into_entity_workflow(entity_data, candidate)
+
+        self.push_screen(
+            EntityCandidateMergePreviewModal(entity_data, candidate),
+            on_confirm
+        )
+
+    @work(thread=True)
+    def merge_into_entity_workflow(
+        self, entity_data: Dict[str, Any], candidate: EntityCandidate
+    ) -> None:
+        """Execute merge of candidate into existing entity."""
+        service = self.get_curation_service()
+        try:
+            entity_id = entity_data.get("id")
+            success = service.merge_candidate_into_entity(entity_id, candidate)
+
+            if success:
+                def on_success() -> None:
+                    self.session_tracker.record_merge()
+                    self.notify(
+                        f"✓ Merged into entity: {entity_data.get('canonical_name')}",
+                        severity="information"
+                    )
+                    self.load_candidates(preserve_index=True, show_loaded_notification=False)
+                
+                self.call_from_thread(on_success)
+            else:
+                self.call_from_thread(
+                    self.notify, "✗ Failed to merge into entity", severity="error"
+                )
+
+        except Exception as e:
+            self.call_from_thread(
+                self.notify, f"✗ Error in merge to entity: {e}", severity="error", markup=False
+            )
+        finally:
+            service.manager.close()
 
     def action_search(self) -> None:
         """Handle search action (bound to '/' key)."""

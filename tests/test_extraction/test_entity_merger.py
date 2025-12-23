@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import List
 
-from pytest import approx
+import pytest
 
 from src.extraction.entity_merger import EntityMerger
-from src.extraction.llm_extractor import LLMExtractedEntity
-from src.extraction.spacy_extractor import ExtractedEntity
+from src.extraction.models import ExtractedEntity
+from src.normalization.string_normalizer import StringNormalizer
 
 
 def _spacy_entity(
@@ -17,8 +17,8 @@ def _spacy_entity(
     document_id: str = "doc1",
 ) -> ExtractedEntity:
     return ExtractedEntity(
-        text=text,
-        label=label,
+        name=text,
+        type=label,
         confidence=confidence,
         start_char=0,
         end_char=len(text),
@@ -26,6 +26,7 @@ def _spacy_entity(
         context=text,
         chunk_id=chunk_id,
         document_id=document_id,
+        source="spacy",
     )
 
 
@@ -37,8 +38,8 @@ def _llm_entity(
     chunk_id: str = "c1",
     document_id: str = "doc1",
     description: str = "",
-) -> LLMExtractedEntity:
-    return LLMExtractedEntity(
+) -> ExtractedEntity:
+    return ExtractedEntity(
         name=name,
         type=ent_type,
         confidence=confidence,
@@ -46,6 +47,7 @@ def _llm_entity(
         chunk_id=chunk_id,
         document_id=document_id,
         description=description,
+        source="llm",
     )
 
 
@@ -77,7 +79,7 @@ def test_merger_resolves_type_conflicts() -> None:
     candidate = merged[0]
     assert candidate.resolved_type == "SYSTEM"
     assert "COMPONENT" in candidate.conflicting_types
-    assert candidate.combined_confidence == approx(1 - (1 - 0.63) * (1 - 0.55) + 0.05, rel=0.05)
+    assert candidate.combined_confidence == pytest.approx(1 - (1 - 0.63) * (1 - 0.55) + 0.05, rel=0.05)
     assert candidate.chunk_id == "c1"
 
 
@@ -133,8 +135,8 @@ def test_merger_filters_disallowed_types() -> None:
 def test_merger_preserves_spacy_provenance_fields() -> None:
     spacy_entities = [
         ExtractedEntity(
-            text="solar array",
-            label="COMPONENT",
+            name="solar array",
+            type="COMPONENT",
             confidence=0.6,
             start_char=10,
             end_char=20,
@@ -143,6 +145,7 @@ def test_merger_preserves_spacy_provenance_fields() -> None:
             chunk_id="c1",
             document_id="doc1",
             metadata={"source": "ner"},
+            source="spacy"
         )
     ]
 
@@ -157,6 +160,7 @@ def test_merger_preserves_spacy_provenance_fields() -> None:
     assert prov.sentence == "The solar array is deployed."
     assert prov.context == "... The solar array is deployed. ..."
     assert prov.metadata["source"] == "ner"
+
 
 
 def test_merger_handles_empty_inputs() -> None:

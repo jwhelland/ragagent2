@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from src.extraction.llm_extractor import LLMExtractedEntity, LLMExtractedRelationship
+from src.extraction.models import ExtractedEntity, ExtractedRelationship
 from src.pipeline.ingestion_pipeline import IngestionPipeline
 from src.utils.config import Config
 
@@ -28,7 +28,7 @@ class _FakeLLMExtractor:
             {"chunk_id": getattr(chunk, "chunk_id", None), "context": document_context}
         )
         return [
-            LLMExtractedEntity(
+            ExtractedEntity(
                 name="solar array",
                 type="COMPONENT",
                 description="Generates power",
@@ -36,6 +36,7 @@ class _FakeLLMExtractor:
                 confidence=0.9,
                 chunk_id=chunk.chunk_id,
                 document_id=chunk.document_id,
+                source="llm"
             )
         ]
 
@@ -48,7 +49,7 @@ class _FakeLLMExtractor:
     ):
         self.relationship_known_entities = list(known_entities or [])
         return [
-            LLMExtractedRelationship(
+            ExtractedRelationship(
                 source="battery",
                 target="solar_array",
                 type="DEPENDS_ON",
@@ -57,6 +58,7 @@ class _FakeLLMExtractor:
                 bidirectional=False,
                 chunk_id=getattr(chunk, "chunk_id", None),
                 document_id=getattr(chunk, "document_id", None),
+                source_extractor="llm"
             )
         ]
 
