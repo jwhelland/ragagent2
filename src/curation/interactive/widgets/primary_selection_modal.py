@@ -138,7 +138,9 @@ class PrimarySelectionModal(ModalScreen[Optional[EntityCandidate]]):
                                 classes="candidate-description",
                             )
                         else:
-                            yield Static("    (no description)", classes="candidate-description-empty")
+                            yield Static(
+                                "    (no description)", classes="candidate-description-empty"
+                            )
 
             # Buttons
             with Container(id="button-container"):

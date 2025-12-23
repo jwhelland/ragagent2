@@ -200,6 +200,10 @@ class LLMExtractor:
         attempts = max(1, self.config.retry_attempts)
         last_error: Exception | None = None
 
+        logger.info(
+            f"Calling LLM for extraction using {self.config.provider}: {self.config.model}"
+        )
+
         for attempt in range(1, attempts + 1):
             try:
                 if self.config.provider == "openai":
@@ -225,23 +229,45 @@ class LLMExtractor:
         raise RuntimeError("LLM request failed for unknown reasons")
 
     def _call_openai(self, *, system: str, user: str) -> str:
-        from openai import OpenAI
+        from openai import BadRequestError, OpenAI
 
         client_kwargs: Dict[str, Any] = {}
         if self.config.base_url:
             client_kwargs["base_url"] = self.config.base_url
 
         client = OpenAI(**client_kwargs)
-        response = client.chat.completions.create(
-            model=self.config.model,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            timeout=self.config.timeout,
-            messages=[
+
+        # Base arguments for chat completion
+        completion_kwargs = {
+            "model": self.config.model,
+            "timeout": self.config.timeout,
+            "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-        )
+        }
+
+        # Proactive heuristics for known restricted model families (O1, some 'mini' models)
+        model_lower = self.config.model.lower()
+        if "o1-" in model_lower or "mini" in model_lower:
+            pass # No temperature heuristic needed anymore
+
+        try:
+            # First attempt (possibly with heuristics applied)
+            response = client.chat.completions.create(**completion_kwargs)
+        except BadRequestError as e:
+            error_msg = str(e).lower()
+            changed = False
+
+            # No temperature restrictions to handle anymore
+
+            if changed:
+                # Retry with adjusted parameters
+                response = client.chat.completions.create(**completion_kwargs)
+            else:
+                # If it's some other bad request, re-raise
+                raise e
+
         content = response.choices[0].message.content
         if isinstance(content, list):
             parts = []
@@ -263,11 +289,10 @@ class LLMExtractor:
         client = anthropic.Anthropic(**client_kwargs)
         message = client.messages.create(
             model=self.config.model,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
             timeout=self.config.timeout,
             system=system,
             messages=[{"role": "user", "content": user}],
+            max_tokens=4096,  # Anthropic usually requires max_tokens, setting a safe default
         )
         parts = []
         for block in message.content:

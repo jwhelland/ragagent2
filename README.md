@@ -168,6 +168,27 @@ uv run ragagent-ingest --directory data/raw --dry-run
 Key flags: `--directory` (or pass paths), `--batch-size`, `--config`, `--verbose`,
 `--dry-run`, `--force-reingest` (bypass checkpoint skip and reprocess a completed doc).
 
+### Incremental Updates
+
+Handle document additions, modifications, and deletions without full re-ingestion.
+
+```bash
+# Scan for changes and update system
+uv run ragagent-update data/raw
+
+# Dry run to see what would change
+uv run ragagent-update data/raw --dry-run
+
+# Limit to specific file extensions
+uv run ragagent-update data/raw --extensions .pdf .txt
+```
+
+The update system will:
+- Detect new files and ingest them
+- Detect modified files (by content checksum) and re-ingest them
+- Detect deleted files and remove them from the knowledge graph and vector store
+- Preserve approved entities and relationships where possible
+
 ### Run Entity Discovery
 
 ```bash
@@ -251,6 +272,8 @@ ragagent2/
 ## Development
 
 ### Running Tests
+
+For detailed testing instructions, see [docs/TESTING.md](docs/TESTING.md).
 
 ```bash
 # Run all tests
@@ -388,6 +411,8 @@ docker-compose exec neo4j neo4j-admin database load neo4j --from-path=/backups
 
 - [Architecture](plans/graph-rag-architecture.md) - Detailed system architecture
 - [Developer Tasks](plans/developer-tasks.md) - Implementation task breakdown
+- [Testing Guide](docs/TESTING.md) - E2E testing and VCR cassettes
+- [Known Issues](docs/KNOWN_ISSUES.md) - Limitations and workarounds
 - [Enhancements](plans/enhancements-summary.md) - Key enhancements and their impact
 
 ## Roadmap

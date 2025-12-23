@@ -12,6 +12,7 @@ Outputs are written as JSON + Markdown, with an optional GraphViz DOT co-occurre
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 from collections import Counter, defaultdict
@@ -132,18 +133,27 @@ class DiscoveryReport(BaseModel):
         lines.append("")
         for key in sorted(self.totals):
             lines.append(f"- **{key}**: {self.totals[key]}")
+
         if self.by_type:
             lines.append("")
             lines.append("### By Type")
             lines.append("")
+            max_count = max((row.get("count", 0) for row in self.by_type), default=0)
             for row in self.by_type[:25]:
-                lines.append(f"- `{row.get('candidate_type')}`: {row.get('count')}")
+                count = row.get("count", 0)
+                bar = self._ascii_bar(count, max_count)
+                lines.append(f"- `{row.get('candidate_type')}`: {count} {bar}")
+
         if self.by_status:
             lines.append("")
             lines.append("### By Status")
             lines.append("")
+            max_count = max((row.get("count", 0) for row in self.by_status), default=0)
             for row in self.by_status:
-                lines.append(f"- `{row.get('status')}`: {row.get('count')}")
+                count = row.get("count", 0)
+                bar = self._ascii_bar(count, max_count)
+                lines.append(f"- `{row.get('status')}`: {count} {bar}")
+
         if self.top_entities:
             lines.append("")
             lines.append("## Top Entities")
@@ -201,6 +211,145 @@ class DiscoveryReport(BaseModel):
                 lines.append(f"- `{key}`: `{self.artifacts[key]}`")
         lines.append("")
         return "\n".join(lines)
+
+    def to_html(self, *, candidate_names: Mapping[str, str] | None = None) -> str:
+        candidate_names = candidate_names or {}
+        html = [
+            "<!DOCTYPE html>",
+            "<html>",
+            "<head>",
+            "<meta charset='utf-8'>",
+            "<title>Entity Discovery Report</title>",
+            "<style>",
+            "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 1000px; margin: 0 auto; padding: 40px; }",
+            "h1 { border-bottom: 2px solid #eee; padding-bottom: 10px; }",
+            "h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; margin-top: 40px; }",
+            "table { border-collapse: collapse; width: 100%; margin: 20px 0; }",
+            "th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }",
+            "th { background-color: #f8f8f8; }",
+            "tr:nth-child(even) { background-color: #f9f9f9; }",
+            ".bar-container { background-color: #eee; width: 200px; height: 16px; display: inline-block; vertical-align: middle; margin-left: 10px; }",
+            ".bar { background-color: #4a90e2; height: 100%; }",
+            "code { background-color: #f4f4f4; padding: 2px 4px; border-radius: 4px; font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace; font-size: 85%; }",
+            ".stat-box { display: flex; flex-wrap: wrap; gap: 20px; margin: 20px 0; }",
+            ".stat-item { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 15px; flex: 1; min-width: 200px; text-align: center; }",
+            ".stat-value { font-size: 24px; font-weight: bold; color: #4a90e2; }",
+            ".stat-label { font-size: 14px; color: #6c757d; text-transform: uppercase; }",
+            "</style>",
+            "</head>",
+            "<body>",
+            "<h1>Entity Discovery Report</h1>",
+            f"<p>Generated at: <code>{self.generated_at.isoformat()}</code></p>",
+        ]
+
+        if self.totals:
+            html.append("<h2>Corpus Stats</h2>")
+            html.append("<div class='stat-box'>")
+            for key in sorted(self.totals):
+                html.append(
+                    f"<div class='stat-item'><div class='stat-value'>{self.totals[key]}</div><div class='stat-label'>{key}</div></div>"
+                )
+            html.append("</div>")
+
+        if self.by_type:
+            html.append("<h3>By Type</h3>")
+            html.append(
+                "<table><thead><tr><th>Type</th><th>Count</th><th>Distribution</th></tr></thead><tbody>"
+            )
+            max_count = max((row.get("count", 0) for row in self.by_type), default=0)
+            for row in self.by_type[:25]:
+                count = row.get("count", 0)
+                width = (count / max_count * 100) if max_count > 0 else 0
+                html.append(
+                    f"<tr><td><code>{row.get('candidate_type')}</code></td><td>{count}</td>"
+                    f"<td><div class='bar-container'><div class='bar' style='width: {width}%'></div></div></td></tr>"
+                )
+            html.append("</tbody></table>")
+
+        if self.top_entities:
+            html.append("<h2>Top Entities</h2>")
+            html.append(
+                "<table><thead><tr><th>Name</th><th>Type</th><th>Mentions</th><th>Chunks</th><th>Conf</th></tr></thead><tbody>"
+            )
+            for row in self.top_entities[:50]:
+                key = row.get("candidate_key", "")
+                name = row.get("canonical_name") or candidate_names.get(key) or key
+                html.append(
+                    f"<tr><td><code>{name}</code></td><td>{row.get('candidate_type')}</td>"
+                    f"<td>{row.get('mention_count')}</td><td>{row.get('chunks_seen')}</td>"
+                    f"<td>{row.get('confidence_score'):.2f}</td></tr>"
+                )
+            html.append("</tbody></table>")
+
+        if self.cooccurrence_edges:
+            html.append("<h2>Top Co-occurrence Pairs</h2>")
+            html.append(
+                "<table><thead><tr><th>Entity A</th><th>Entity B</th><th>Count</th><th>PMI</th></tr></thead><tbody>"
+            )
+            for edge in self.cooccurrence_edges[:50]:
+                left = candidate_names.get(edge.left_key, edge.left_key)
+                right = candidate_names.get(edge.right_key, edge.right_key)
+                html.append(
+                    f"<tr><td><code>{left}</code></td><td><code>{right}</code></td>"
+                    f"<td>{edge.count}</td><td>{edge.pmi:.2f}</td></tr>"
+                )
+            html.append("</tbody></table>")
+
+            # Matrix for top 10
+            counts: Counter[str] = Counter()
+            for edge in self.cooccurrence_edges:
+                counts[edge.left_key] += edge.count
+                counts[edge.right_key] += edge.count
+            top_matrix_keys = [k for k, _ in counts.most_common(12)]
+            if top_matrix_keys:
+                html.append("<h2>Co-occurrence Matrix (Top 12)</h2>")
+                html.append("<table><thead><tr><th>-</th>")
+                for k in top_matrix_keys:
+                    name = candidate_names.get(k, k)
+                    html.append(f"<th>{name}</th>")
+                html.append("</tr></thead><tbody>")
+
+                matrix_data: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+                for edge in self.cooccurrence_edges:
+                    if edge.left_key in top_matrix_keys and edge.right_key in top_matrix_keys:
+                        matrix_data[edge.left_key][edge.right_key] = edge.count
+                        matrix_data[edge.right_key][edge.left_key] = edge.count
+
+                for k1 in top_matrix_keys:
+                    html.append(f"<tr><td><strong>{candidate_names.get(k1, k1)}</strong></td>")
+                    for k2 in top_matrix_keys:
+                        val = matrix_data[k1][k2]
+                        style = (
+                            f"background-color: rgba(74, 144, 226, {min(1.0, val/10)})"
+                            if val > 0
+                            else ""
+                        )
+                        html.append(f"<td style='{style}'>{val if val > 0 else '-'}</td>")
+                    html.append("</tr>")
+                html.append("</tbody></table>")
+
+        if self.merge_suggestions:
+            html.append("<h2>Merge Suggestions</h2>")
+            html.append(
+                "<table><thead><tr><th>Method</th><th>Source</th><th>Target</th><th>Type</th><th>Score</th><th>Reason</th></tr></thead><tbody>"
+            )
+            for sug in self.merge_suggestions[:50]:
+                left = candidate_names.get(sug.source_key, sug.source_key)
+                right = candidate_names.get(sug.target_key, sug.target_key)
+                html.append(
+                    f"<tr><td>{sug.method}</td><td><code>{left}</code></td><td><code>{right}</code></td>"
+                    f"<td>{sug.entity_type}</td><td>{sug.score:.2f}</td><td>{sug.reason}</td></tr>"
+                )
+            html.append("</tbody></table>")
+
+        html.extend(["</body>", "</html>"])
+        return "\n".join(html)
+
+    def _ascii_bar(self, value: int, max_value: int, width: int = 20) -> str:
+        if max_value <= 0:
+            return ""
+        filled = int((value / max_value) * width)
+        return "[" + "█" * filled + " " * (width - filled) + "]"
 
 
 @dataclass(frozen=True)
@@ -549,6 +698,41 @@ def write_graphviz_dot(
     return output_path
 
 
+def write_cooccurrence_matrix(
+    edges: Sequence[CooccurrenceEdge],
+    *,
+    candidate_names: Mapping[str, str],
+    output_path: Path,
+    max_nodes: int = 100,
+) -> Path:
+    """Write co-occurrence matrix to CSV."""
+    counts: Counter[str] = Counter()
+    for edge in edges:
+        counts[edge.left_key] += edge.count
+        counts[edge.right_key] += edge.count
+
+    top_keys = [key for key, _ in counts.most_common(max_nodes)]
+    top_names = [candidate_names.get(key, key) for key in top_keys]
+
+    matrix: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for edge in edges:
+        if edge.left_key in top_keys and edge.right_key in top_keys:
+            matrix[edge.left_key][edge.right_key] = edge.count
+            matrix[edge.right_key][edge.left_key] = edge.count
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Entity"] + top_names)
+        for i, key in enumerate(top_keys):
+            row = [top_names[i]]
+            for other_key in top_keys:
+                row.append(matrix[key][other_key])
+            writer.writerow(row)
+
+    return output_path
+
+
 class DiscoveryPipeline:
     """Analyze EntityCandidate corpus and write discovery artifacts."""
 
@@ -636,14 +820,18 @@ class DiscoveryPipeline:
         output_dir.mkdir(parents=True, exist_ok=True)
         json_path = output_dir / "discovery_report.json"
         markdown_path = output_dir / "discovery_report.md"
+        html_path = output_dir / "discovery_report.html"
 
         json_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
         markdown_path.write_text(
             report.to_markdown(candidate_names=candidate_names), encoding="utf-8"
         )
+        html_path.write_text(report.to_html(candidate_names=candidate_names), encoding="utf-8")
+
         report.artifacts = {
             "report_json": str(json_path),
             "report_markdown": str(markdown_path),
+            "report_html": str(html_path),
         }
 
         if create_visualization and edges:
@@ -653,6 +841,13 @@ class DiscoveryPipeline:
                 output_path=output_dir / "cooccurrence.dot",
             )
             report.artifacts["cooccurrence_dot"] = str(dot_path)
+
+            matrix_path = write_cooccurrence_matrix(
+                edges,
+                candidate_names=candidate_names,
+                output_path=output_dir / "cooccurrence_matrix.csv",
+            )
+            report.artifacts["cooccurrence_matrix"] = str(matrix_path)
 
         (output_dir / "candidate_name_map.json").write_text(
             json.dumps(candidate_names, indent=2, sort_keys=True), encoding="utf-8"

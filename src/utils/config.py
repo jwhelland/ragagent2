@@ -37,7 +37,7 @@ class LLMConfig(BaseSettings):
     """LLM configuration."""
 
     provider: Literal["openai", "anthropic"] = "openai"
-    model: str = "gpt-4o-mini"
+    model: str = "gpt-4.1-mini"
     temperature: float = 0.1
     max_tokens: int = 2000
     timeout: int = 60
@@ -273,6 +273,7 @@ class Config(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="allow",
+        env_nested_delimiter="__",
     )
 
     # Configuration sections
@@ -289,7 +290,7 @@ class Config(BaseSettings):
     llm_provider: Literal["openai", "anthropic"] = "openai"
     openai_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
+    openai_model: str = "gpt-4.1-mini"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-3-5-sonnet-20241022"
 

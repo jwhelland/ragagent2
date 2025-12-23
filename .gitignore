@@ -38,6 +38,8 @@ data/discovery/*
 !data/entities/.gitkeep
 !data/normalization/.gitkeep
 !data/discovery/.gitkeep
+!data/queries/.gitkeep
+!data/curation/.gitkeep
 
 # Logs
 logs/
@@ -47,6 +49,7 @@ logs/
 .coverage
 htmlcov/
 .pytest_cache/
+#tests/cassettes/
 
 # Jupyter
 .ipynb_checkpoints/

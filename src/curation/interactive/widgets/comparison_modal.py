@@ -53,9 +53,7 @@ class CandidateComparisonView(Vertical):
 
         # Confidence
         conf_bar = "█" * int(c.confidence_score * 10)
-        yield Static(
-            f"[cyan]Confidence:[/cyan] {c.confidence_score:.2f} [green]{conf_bar}[/green]"
-        )
+        yield Static(f"[cyan]Confidence:[/cyan] {c.confidence_score:.2f} [green]{conf_bar}[/green]")
 
         # Mentions
         yield Static(f"[cyan]Mentions:[/cyan] {c.mention_count}")
@@ -71,7 +69,9 @@ class CandidateComparisonView(Vertical):
 
         # Description
         if c.description:
-            desc_preview = c.description[:150] + "..." if len(c.description) > 150 else c.description
+            desc_preview = (
+                c.description[:150] + "..." if len(c.description) > 150 else c.description
+            )
             yield Static(f"[cyan]Description:[/cyan]\n{desc_preview}")
         else:
             yield Static("[cyan]Description:[/cyan] [dim](none)[/dim]")
@@ -265,7 +265,9 @@ class ComparisonModalScreen(ModalScreen):
         preview.append(f"• Type: {primary.candidate_type.value}")
         preview.append(f"• Aliases: {len(all_aliases)} total ({', '.join(all_aliases[:3])}...)")
         preview.append(f"• Mentions: {total_mentions} (combined)")
-        preview.append(f"• Confidence: {max(primary.confidence_score, duplicate.confidence_score):.2f} (max)")
+        preview.append(
+            f"• Confidence: {max(primary.confidence_score, duplicate.confidence_score):.2f} (max)"
+        )
 
         return "\n".join(preview)
 

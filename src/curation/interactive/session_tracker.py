@@ -172,7 +172,7 @@ class SessionTracker:
             return False
 
         try:
-            with open(self.session_file, "r") as f:
+            with open(self.session_file) as f:
                 data = json.load(f)
 
             self.stats = SessionStats.model_validate(data)

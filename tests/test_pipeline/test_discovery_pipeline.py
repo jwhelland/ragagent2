@@ -155,3 +155,45 @@ def test_fuzzy_merge_suggestions_returns_high_confidence_pairs() -> None:
         for suggestion in suggestions
     )
     assert all(suggestion.method == "fuzzy" for suggestion in suggestions)
+
+
+def test_discovery_report_formatting() -> None:
+    from src.pipeline.discovery_pipeline import (
+        CooccurrenceEdge,
+        DiscoveryMergeSuggestion,
+        DiscoveryReport,
+    )
+
+    report = DiscoveryReport(
+        totals={"candidates": 10, "chunks": 5},
+        by_type=[{"candidate_type": "PERSON", "count": 7}, {"candidate_type": "ORG", "count": 3}],
+        cooccurrence_edges=[CooccurrenceEdge(left_key="A", right_key="B", count=5, pmi=2.0)],
+        merge_suggestions=[
+            DiscoveryMergeSuggestion(
+                method="fuzzy",
+                source_key="A",
+                target_key="C",
+                entity_type="PERSON",
+                score=0.9,
+                confidence=0.8,
+                reason="test",
+            )
+        ],
+    )
+
+    md = report.to_markdown(candidate_names={"A": "Alice", "B": "Bob", "C": "Alicia"})
+    assert "# Entity Discovery Report" in md
+    assert "Alice" in md
+    assert "Bob" in md
+    assert "Alicia" in md
+    assert "PERSON" in md
+    # Check ASCII bar
+    assert "█" in md
+
+    html = report.to_html(candidate_names={"A": "Alice", "B": "Bob", "C": "Alicia"})
+    assert "<!DOCTYPE html>" in html
+    assert "Alice" in html
+    assert "Bob" in html
+    assert "Alicia" in html
+    assert "Co-occurrence Matrix" in html
+    assert "background-color: rgba" in html

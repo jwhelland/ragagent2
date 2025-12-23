@@ -91,9 +91,7 @@ class ResponseGenerator:
             answer = "I'm sorry, I encountered an error while generating a response."
 
         # Extract used chunk IDs (simple heuristic: look for [chunk_id] in answer)
-        chunks_used = [
-            c.chunk_id for c in retrieval_result.chunks if f"[{c.chunk_id}]" in answer
-        ]
+        chunks_used = [c.chunk_id for c in retrieval_result.chunks if f"[{c.chunk_id}]" in answer]
 
         generation_time = time.time() - start_time
 
@@ -162,6 +160,10 @@ class ResponseGenerator:
         attempts = max(1, self.llm_config.retry_attempts)
         last_error = None
 
+        logger.info(
+            f"Calling LLM for response generation using {self.llm_config.provider}: {self.llm_config.model}"
+        )
+
         for attempt in range(1, attempts + 1):
             try:
                 if self.llm_config.provider == "openai":
@@ -174,7 +176,7 @@ class ResponseGenerator:
                 last_error = e
                 logger.warning(f"LLM call attempt {attempt} failed: {e}")
                 if attempt < attempts:
-                    self._sleep(2 ** attempt)
+                    self._sleep(2**attempt)
 
         if last_error:
             raise last_error
@@ -195,7 +197,6 @@ class ResponseGenerator:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            max_completion_tokens=self.llm_config.max_tokens,
         )
         return response.choices[0].message.content or ""
 
@@ -208,10 +209,10 @@ class ResponseGenerator:
             model=self.llm_config.model,
             system=system,
             messages=[{"role": "user", "content": user}],
-            max_tokens=self.llm_config.max_tokens,
+            max_tokens=4096,
         )
         # Handle the list of content blocks
-        return "".join([block.text for block in response.content if hasattr(block, 'text')])
+        return "".join([block.text for block in response.content if hasattr(block, "text")])
 
     def _calculate_confidence(self, result: HybridRetrievalResult, answer: str) -> float:
         """Calculate confidence in generated answer."""

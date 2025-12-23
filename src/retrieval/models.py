@@ -87,7 +87,9 @@ class HybridRetrievalResult(BaseModel):
     graph_paths: List[GraphPath] = Field(
         default_factory=list, description="Graph paths (if applicable)"
     )
-    answer: Optional[GeneratedResponse] = Field(None, description="Generated natural language answer")
+    answer: Optional[GeneratedResponse] = Field(
+        None, description="Generated natural language answer"
+    )
 
     # Statistics
     total_results: int = Field(..., ge=0, description="Total results before reranking")

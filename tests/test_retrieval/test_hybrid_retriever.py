@@ -1,7 +1,7 @@
 """Tests for hybrid retriever (Task 4.4)."""
 
 from datetime import datetime
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -225,11 +225,15 @@ class TestHybridRetrieverInitialization:
 
     def test_init_with_defaults(self, mock_neo4j: Mock) -> None:
         """Test initialization with default configuration."""
-        retriever = HybridRetriever(neo4j_manager=mock_neo4j)
-        assert retriever.config is not None
-        assert retriever.vector_retriever is not None
-        assert retriever.graph_retriever is not None
-        assert retriever.hybrid_config.parallel_execution is True
+        with (
+            patch("src.retrieval.hybrid_retriever.VectorRetriever"),
+            patch("src.retrieval.hybrid_retriever.GraphRetriever"),
+        ):
+            retriever = HybridRetriever(neo4j_manager=mock_neo4j)
+            assert retriever.config is not None
+            assert retriever.vector_retriever is not None
+            assert retriever.graph_retriever is not None
+            assert retriever.hybrid_config.parallel_execution is True
 
 
 class TestStrategySelection:

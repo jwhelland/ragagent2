@@ -309,6 +309,91 @@ class EntityCurationService:
         )
         return entity_id
 
+    def merge_candidate_into_entity(self, entity_id: str, candidate: EntityCandidate) -> bool:
+        """Merge a candidate into an existing approved entity."""
+        existing_entity_data = self.manager.get_entity(entity_id)
+        if not existing_entity_data:
+            logger.error(f"Target entity {entity_id} not found for merge")
+            return False
+
+        # 1. Update existing entity
+        # We need to manually update fields like aliases, mention_count, etc.
+        current_aliases = set(existing_entity_data.get("aliases", []))
+        new_aliases = set(candidate.aliases) | {candidate.canonical_name}
+        merged_aliases = sorted(current_aliases | new_aliases)
+
+        current_docs = set(existing_entity_data.get("source_documents", []))
+        new_docs = set(candidate.source_documents)
+        merged_docs = sorted(current_docs | new_docs)
+
+        # Note: Neo4j get_entity returns all properties, we need to filter or just update what we want
+
+        merged_props = {
+            "aliases": merged_aliases,
+            "source_documents": merged_docs,
+            "mention_count": existing_entity_data.get("mention_count", 0) + candidate.mention_count,
+            "last_updated": datetime.now().isoformat(),
+        }
+
+        # Handle chunk_ids in properties if they exist
+        existing_chunks = set(existing_entity_data.get("chunk_ids", []))
+        new_chunks = set(candidate.chunk_ids)
+        if existing_chunks or new_chunks:
+            merged_props["chunk_ids"] = sorted(existing_chunks | new_chunks)
+
+        # Handle merged_candidate_keys
+        existing_keys = set(existing_entity_data.get("merged_candidate_keys", []))
+        if candidate.candidate_key:
+            merged_props["merged_candidate_keys"] = sorted(
+                existing_keys | {candidate.candidate_key}
+            )
+
+        self.manager.update_entity(entity_id, merged_props)
+
+        # 2. Update candidate status
+        identifier = self._candidate_identifier(candidate)
+        previous_status = candidate.status
+        self.manager.update_entity_candidate_status(identifier, CandidateStatus.MERGED_INTO_ENTITY)
+
+        # 3. Update normalization table
+        normalization_changes = self._upsert_normalization_entries(
+            entity_id=entity_id,
+            canonical_name=existing_entity_data.get("canonical_name", "entity"),
+            entity_type=EntityType(existing_entity_data.get("entity_type", "CONCEPT")),
+            raw_texts=[candidate.canonical_name, *candidate.aliases],
+            status="approved",
+        )
+
+        # 4. Promote related relationship candidates
+        relationship_candidate_statuses = self._promote_related_relationship_candidates(
+            raw_mentions=[candidate.canonical_name, *candidate.aliases]
+        )
+
+        # 5. Push to undo stack
+        # For merging into existing entity, we need to store the previous state of the entity to revert properly
+        self._push_undo(
+            UndoAction(
+                operation="merge_candidate_into_entity",
+                entity_id=entity_id,
+                candidate_statuses=[
+                    StatusCheckpoint(identifier=identifier, previous_status=previous_status)
+                ],
+                relationship_candidate_statuses=relationship_candidate_statuses,
+                normalization_changes=normalization_changes,
+                previous_values=existing_entity_data,  # Store full snapshot for undo
+            )
+        )
+
+        self._record_audit(
+            "merge_candidate_into_entity",
+            {
+                "entity_id": entity_id,
+                "candidate_key": candidate.candidate_key,
+                "aliases_added": list(new_aliases),
+            },
+        )
+        return True
+
     def undo_last_operation(self) -> bool:
         """Undo the most recent curation operation."""
         if not self._undo_stack:
@@ -322,6 +407,28 @@ class EntityCurationService:
             entity_id = action.entity_id
             if isinstance(entity_id, str):
                 self.manager.delete_entity(entity_id)
+
+            for checkpoint in action.candidate_statuses:
+                self.manager.update_entity_candidate_status(
+                    checkpoint.identifier, checkpoint.previous_status
+                )
+
+            for checkpoint in action.normalization_changes:
+                if checkpoint.previous_record:
+                    self.normalization_table.restore_record(checkpoint.previous_record)
+                else:
+                    self.normalization_table.remove(checkpoint.raw_text)
+
+            for checkpoint in action.relationship_candidate_statuses:
+                self.manager.update_relationship_candidate_status(
+                    checkpoint.identifier, checkpoint.previous_status
+                )
+
+        elif action.operation == "merge_candidate_into_entity":
+            entity_id = action.entity_id
+            previous_values = action.previous_values
+            if isinstance(entity_id, str) and previous_values:
+                self.manager.update_entity(entity_id, previous_values)
 
             for checkpoint in action.candidate_statuses:
                 self.manager.update_entity_candidate_status(

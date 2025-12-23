@@ -135,7 +135,11 @@ def main() -> None:
         parameters=params,
         create_visualization=not args.no_viz,
     )
-    logger.info("Done. Report markdown: {}", report.artifacts.get("report_markdown"))
+    logger.info(
+        "Done. Reports: MD={}, HTML={}",
+        report.artifacts.get("report_markdown"),
+        report.artifacts.get("report_html"),
+    )
 
 
 if __name__ == "__main__":

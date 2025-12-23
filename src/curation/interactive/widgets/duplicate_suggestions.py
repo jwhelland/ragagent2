@@ -177,9 +177,7 @@ class DuplicateSuggestionsPanel(VerticalScroll):
 
             # Check for fuzzy name similarity
             candidate_name_lower = candidate.canonical_name.lower()
-            similarity = SequenceMatcher(
-                None, current_name_lower, candidate_name_lower
-            ).ratio()
+            similarity = SequenceMatcher(None, current_name_lower, candidate_name_lower).ratio()
 
             if similarity > 0.7:
                 suggestions.append(

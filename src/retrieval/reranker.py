@@ -59,7 +59,10 @@ class Reranker:
         reranked_chunks = self._apply_score_fusion(chunks)
 
         # Apply diversity ranking if enabled and weight > 0
-        if self.reranking_config.enabled and self.reranking_config.weights.get("diversity", 0.0) > 0:
+        if (
+            self.reranking_config.enabled
+            and self.reranking_config.weights.get("diversity", 0.0) > 0
+        ):
             reranked_chunks = self._apply_diversity_ranking(reranked_chunks)
 
         # Sort by final score descending

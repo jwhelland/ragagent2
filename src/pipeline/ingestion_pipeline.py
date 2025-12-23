@@ -1256,6 +1256,7 @@ class IngestionPipeline:
             properties={
                 "ingestion_status": "ingesting",
                 "last_ingested_at": datetime.now().isoformat(),
+                "file_path": parsed_doc.metadata.get("file_path"),
             },
         )
 
@@ -1351,6 +1352,7 @@ class IngestionPipeline:
         props = {
             "ingestion_status": status,
             "last_ingested_at": datetime.now().isoformat(),
+            "file_path": parsed_doc.metadata.get("file_path"),
         }
         if error:
             props["ingestion_error"] = error

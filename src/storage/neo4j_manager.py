@@ -823,28 +823,52 @@ class Neo4jManager:
                 return True
             return False
 
-    def delete_entity(self, entity_id: str) -> bool:
-        """Delete an entity and all its relationships.
+    def deactivate_document_data(self, document_id: str) -> bool:
+        """Mark all chunks and relationship candidates for a document as inactive.
+
+        This is used during incremental updates to 'soft-delete' old data before
+        re-ingesting a modified document.
 
         Args:
-            entity_id: Entity ID
+            document_id: Document ID
 
         Returns:
-            True if entity was deleted, False if not found
+            True if data was deactivated
         """
         with self.session() as session:
             query = """
-            MATCH (n {id: $entity_id})
-            WHERE any(label IN labels(n) WHERE label IN $entity_types)
-            DETACH DELETE n
-            RETURN count(n) as deleted
+            MATCH (c:Chunk {document_id: $document_id})
+            SET c.status = 'inactive'
+            WITH c
+            MATCH (rc:RelationshipCandidate)
+            WHERE $document_id IN rc.source_documents
+            SET rc.status = 'inactive'
+            RETURN count(c) as deactivated_chunks
             """
-            result = session.run(
-                query, entity_id=entity_id, entity_types=[et.value for et in EntityType]
-            )
+            session.run(query, document_id=document_id)
+            return True
+
+    def delete_document(self, document_id: str) -> bool:
+        """Delete a document and all its chunks.
+
+        Args:
+            document_id: Document ID
+
+        Returns:
+            True if document was deleted, False if not found
+        """
+        with self.session() as session:
+            # Delete chunks first, then the document itself
+            query = """
+            MATCH (d:DOCUMENT {id: $document_id})
+            OPTIONAL MATCH (c:Chunk {document_id: $document_id})
+            DETACH DELETE c, d
+            RETURN count(d) as deleted
+            """
+            result = session.run(query, document_id=document_id)
             deleted = result.single()["deleted"]
             if deleted > 0:
-                logger.debug(f"Deleted entity {entity_id}")
+                logger.debug(f"Deleted document {document_id} and its chunks")
                 return True
             return False
 

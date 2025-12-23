@@ -60,9 +60,7 @@ def main() -> None:
         if parsed.entity_mentions:
             print(f"\nEntity Mentions ({len(parsed.entity_mentions)}):")
             for mention in parsed.entity_mentions:
-                entity_type_str = (
-                    f" [{mention.entity_type.value}]" if mention.entity_type else ""
-                )
+                entity_type_str = f" [{mention.entity_type.value}]" if mention.entity_type else ""
                 print(
                     f"  • {mention.text}{entity_type_str} "
                     f"→ {mention.normalized} (confidence: {mention.confidence:.2f})"
@@ -76,9 +74,7 @@ def main() -> None:
         if parsed.constraints:
             print(f"\nConstraints ({len(parsed.constraints)}):")
             for constraint in parsed.constraints:
-                print(
-                    f"  • {constraint.field} {constraint.operator} {constraint.value}"
-                )
+                print(f"  • {constraint.field} {constraint.operator} {constraint.value}")
 
         if parsed.expanded_terms:
             print(f"\nExpanded Terms ({len(parsed.expanded_terms)}):")
@@ -88,7 +84,9 @@ def main() -> None:
         if parsed.keywords:
             print(f"\nKeywords: {', '.join(parsed.keywords[:10])}")
 
-        print(f"\nGraph Traversal: {'Required' if parsed.requires_graph_traversal else 'Not required'}")
+        print(
+            f"\nGraph Traversal: {'Required' if parsed.requires_graph_traversal else 'Not required'}"
+        )
         if parsed.max_depth:
             print(f"Max Depth: {parsed.max_depth}")
 

@@ -18,7 +18,7 @@ def _cfg(tmp_path: Path, *, enabled: bool) -> TextRewritingConfig:
     )
     return TextRewritingConfig(
         enabled=enabled,
-        llm=LLMConfig(provider="openai", model="gpt-4o-mini", temperature=0.0, max_tokens=256),
+        llm=LLMConfig(provider="openai", model="gpt-4.1-mini", temperature=0.0, max_tokens=256),
         chunk_level="section",
         preserve_original=True,
         max_chunk_tokens=2000,

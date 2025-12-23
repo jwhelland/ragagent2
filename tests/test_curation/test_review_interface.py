@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List
 
+import pytest
 from typer.testing import CliRunner
 
 from src.curation import review_interface
@@ -14,8 +15,18 @@ from src.normalization.normalization_table import (
     NormalizationTable,
 )
 from src.storage.schemas import CandidateStatus, EntityCandidate, EntityType
+from src.utils.config import reset_config
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _reset_config_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure config is reset and env vars don't interfere."""
+    monkeypatch.setenv("EMBEDDING_DIMENSION", "384")
+    reset_config()
+    yield
+    reset_config()
 
 
 def _seed_normalization_table(path: Path) -> None:

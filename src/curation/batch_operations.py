@@ -143,6 +143,38 @@ class BatchCurationService:
 
         return BatchOperationResult(merged_entities=merged_entities, failed=failed)
 
+    def batch_merge_into_entity(
+        self,
+        entity_id: str,
+        candidates: Sequence[EntityCandidate],
+        *,
+        dry_run: bool = False,
+    ) -> BatchOperationResult:
+        """Merge multiple candidates into an existing entity."""
+        if dry_run:
+            logger.info(
+                "Dry-run: would merge {} candidates into entity {}", len(candidates), entity_id
+            )
+            return BatchOperationResult(merged_entities=[], preview_only=True)
+
+        checkpoint = self.curation_service.undo_checkpoint()
+        try:
+            for idx, candidate in enumerate(candidates):
+                self._tick(f"Merging candidate {idx + 1}/{len(candidates)} into entity {entity_id}")
+                success = self.curation_service.merge_candidate_into_entity(entity_id, candidate)
+                if not success:
+                    raise Exception(f"Failed to merge candidate {candidate.candidate_key}")
+        except Exception as exc:
+            logger.exception("Batch merge into entity failed, rolling back: {}", exc)
+            self.curation_service.rollback_to_checkpoint(checkpoint)
+            return BatchOperationResult(
+                merged_entities=[],
+                failed=[str(exc)],
+                rolled_back=True,
+            )
+
+        return BatchOperationResult(merged_entities=[entity_id])
+
     def _tick(self, message: str) -> None:
         if self.progress_callback:
             self.progress_callback(message)

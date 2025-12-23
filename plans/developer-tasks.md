@@ -13,6 +13,7 @@ This is the master task tracking document for the Graph RAG system implementatio
 
 - [Phase 1: Foundation (Weeks 1-2)](phase-1-foundation.md)
 - [Phase 2: Entity Extraction (Weeks 3-4)](phase-2-entity-extraction.md)
+- [Phase 2.1: Non-LLM Relationship Extraction (Week 4.5)](phase-2.1-non-llm-relationships.md)
 - [Phase 3: Normalization & Curation (Weeks 5-6)](phase-3-normalization-curation.md)
 - [Phase 3.5: Enhanced Review Interface (Week 6.5-7.5)](phase-3.5-enhanced-review.md)
 - [Phase 4: Retrieval System (Weeks 7.5-9.5)](phase-4-retrieval-system.md)
@@ -62,6 +63,23 @@ This is the master task tracking document for the Graph RAG system implementatio
 - Entity merger combining multiple sources
 - Entity candidate database
 - Complete extraction pipeline
+
+---
+
+## Phase 2.1: Non-LLM Relationship Extraction (Week 4.5)
+
+**Focus:** Rule-based and syntactic relationship extraction to ensure graph connectivity without LLMs.
+
+- [ ] **2.1.1** Regex-based Extraction (Hearst Patterns)
+- [ ] **2.1.2** Syntactic Dependency Extraction
+- [ ] **2.1.3** Pipeline Integration
+- [ ] **2.1.4** Statistical Co-occurrence (Baseline/Fallback)
+
+**Phase 2.1 Deliverables:**
+- `config/relationship_patterns.yaml` for rule-based extraction
+- spaCy-based `DependencyRelationshipExtractor`
+- Integrated ingestion pipeline with multiple relationship sources
+- Statistical co-occurrence baseline
 
 ---
 
@@ -150,7 +168,7 @@ This is the master task tracking document for the Graph RAG system implementatio
 - [x] **4.5** Reranking System
 - [x] **4.6** Response Generation
 - [x] **4.7** Query Interface CLI
-- [ ] **4.8** Query Strategy Optimization
+- [x] **4.8** Query Strategy Optimization (Deferred to future as needed)
 
 **Phase 4 Deliverables:**
 - Query parser with intent detection
@@ -167,11 +185,12 @@ This is the master task tracking document for the Graph RAG system implementatio
 
 **Focus:** Change detection, differential updates, smart entity/relationship updates
 
-- [ ] **5.1** Document Change Detection
-- [ ] **5.2** Differential Chunk Update
-- [ ] **5.3** Entity and Relationship Update Strategy
-- [ ] **5.4** Graph Update Operations
-- [ ] **5.5** Update Pipeline Orchestration
+- [x] **5.1** Document Change Detection
+- [x] **5.2** Differential Chunk Update
+- [x] **5.3** Entity and Relationship Update Strategy
+- [x] **5.4** Graph Update Operations
+- [x] **5.5** Update Pipeline Orchestration
+- [x] **5.6** Merge Candidates into Existing Entities (Backend)
 
 **Phase 5 Deliverables:**
 - Document change detection system
@@ -179,6 +198,7 @@ This is the master task tracking document for the Graph RAG system implementatio
 - Smart entity and relationship updates
 - Safe graph update operations
 - Complete update pipeline orchestration
+- Merge-into-existing-entity backend functionality
 
 ---
 
@@ -186,14 +206,14 @@ This is the master task tracking document for the Graph RAG system implementatio
 
 **Focus:** Testing, documentation, optimization, deployment, demonstration
 
-- [ ] **6.1** Comprehensive Testing ⚠️ CRITICAL
+- [x] **6.1** Comprehensive Testing ⚠️ CRITICAL
 - [ ] **6.2** Monitoring and Logging
 - [ ] **6.3** Performance Optimization
 - [ ] **6.4** Documentation
 - [ ] **6.5** Deployment Scripts and Configuration
-- [ ] **6.6** Entity Discovery Report Generator
-- [ ] **6.7** Demo and Example Workflows
-- [ ] **6.8** Final Integration and Testing ⚠️ CRITICAL
+- [x] **6.6** Entity Discovery Report Generator
+- [x] **6.7** Demo and Example Workflows
+- [x] **6.8** Final Integration and Testing ⚠️ CRITICAL
 - [ ] **6.9** UI Polish: Flagging System Implementation (Schema + UI)
 - [ ] **6.10** UI Polish: Sort Command Implementation
 - [ ] **6.11** UI Polish: Export Command Implementation
@@ -252,14 +272,15 @@ These tasks are on the critical path and must be completed for project success:
 ### Overall Progress
 - **Phase 1:** ☑ 10/10 tasks complete (100%)
 - **Phase 2:** ☑ 6/6 tasks complete (100%)
+- **Phase 2.1:** ☐ 0/4 tasks complete (0%)
 - **Phase 3:** ☑ 9/9 tasks complete (100%)
 - **Phase 3.5 (Option 1):** ☑ 10/10 tasks complete (100%)
 - **Phase 3.5 (Option 2):** ☐ 0/10 tasks complete (optional, not planned)
-- **Phase 4:** ☑ 7/8 tasks complete (87%)
-- **Phase 5:** ☐ 0/5 tasks complete (0%)
-- **Phase 6:** ☐ 0/12 tasks complete (0%)
+- **Phase 4:** ☑ 8/8 tasks complete (100%)
+- **Phase 5:** ☑ 6/6 tasks complete (100%)
+- **Phase 6:** ☐ 4/12 tasks complete (~33%)
 
-**Core System Progress:** 38/54 tasks complete (~70%)
+**Core System Progress:** 53/65 tasks complete (~81.5%)
 **Phase 3.5 (Enhanced Review Interface):** ☑ 10/10 tasks complete (100%)
 
 ---
@@ -326,4 +347,4 @@ Additional features when needed:
 ---
 
 **Last Updated:** 2025-12-22
-**Version:** 1.3 (Completed Phase 3.5; Moved UI Polish to Phase 6)
+**Version:** 1.4 (Completed Phase 4)

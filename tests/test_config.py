@@ -14,8 +14,10 @@ from src.utils.config import load_config, reset_config
 
 
 @pytest.fixture(autouse=True)
-def _reset_global_config() -> None:
+def _reset_global_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure config singleton doesn't leak between tests."""
+    # Override potentially conflicting env vars from local .env
+    monkeypatch.setenv("EMBEDDING_DIMENSION", "384")
     reset_config()
     yield
     reset_config()

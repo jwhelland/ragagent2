@@ -9,21 +9,17 @@ Usage:
 
 import argparse
 import json
-import os
 import sys
-import time
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from loguru import logger
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
-from src.retrieval.hybrid_retriever import HybridRetriever, RetrievalStrategy
+from src.retrieval.hybrid_retriever import HybridRetriever
 from src.retrieval.models import HybridRetrievalResult
 from src.retrieval.query_parser import QueryParser
 from src.storage.neo4j_manager import Neo4jManager
@@ -44,7 +40,7 @@ class QueryInterface:
         """
         self.verbose = verbose
         self.config = Config.from_yaml()
-        
+
         # Configure logging
         logger.remove()
         if verbose:
@@ -58,13 +54,10 @@ class QueryInterface:
         try:
             self.neo4j = Neo4jManager(config=self.config.database)
             self.neo4j.connect()
-            
+
             self.query_parser = QueryParser(config=self.config)
-            self.hybrid_retriever = HybridRetriever(
-                config=self.config, 
-                neo4j_manager=self.neo4j
-            )
-            
+            self.hybrid_retriever = HybridRetriever(config=self.config, neo4j_manager=self.neo4j)
+
             console.print("[bold green]System ready![/bold green]")
         except Exception as e:
             console.print(f"[bold red]Initialization failed: {e}[/bold red]")
@@ -80,13 +73,13 @@ class QueryInterface:
         while True:
             try:
                 query_text = console.input("[bold cyan]Query > [/bold cyan]").strip()
-                
+
                 if not query_text:
                     continue
-                
+
                 if query_text.lower() in ["exit", "quit", "q"]:
                     break
-                
+
                 if query_text.lower() == "help":
                     self._show_help()
                     continue
@@ -97,13 +90,14 @@ class QueryInterface:
 
                 # Process query
                 self.process_query(query_text)
-                
+
             except KeyboardInterrupt:
                 console.print("\n[yellow]Use 'exit' to quit.[/yellow]")
             except Exception as e:
                 console.print(f"[bold red]Error:[/bold red] {e}")
                 if self.verbose:
                     import traceback
+
                     traceback.print_exc()
 
     def process_query(self, query_text: str, top_k: int = 5):
@@ -115,16 +109,14 @@ class QueryInterface:
         """
         with console.status("[bold yellow]Analyzing query...[/bold yellow]"):
             parsed_query = self.query_parser.parse(query_text)
-        
+
         if self.verbose:
             self._display_parsed_query(parsed_query)
 
-        with console.status("[bold yellow]Retrieving context and generating answer...[/bold yellow]"):
-            result = self.hybrid_retriever.retrieve(
-                parsed_query, 
-                top_k=top_k,
-                generate_answer=True
-            )
+        with console.status(
+            "[bold yellow]Retrieving context and generating answer...[/bold yellow]"
+        ):
+            result = self.hybrid_retriever.retrieve(parsed_query, top_k=top_k, generate_answer=True)
 
         # Display answer
         self._display_answer(result)
@@ -134,12 +126,14 @@ class QueryInterface:
             self._display_chunks(result)
 
         # Add to history
-        self.history.append({
-            "timestamp": datetime.now().isoformat(),
-            "query": query_text,
-            "answer": result.answer.answer if result.answer else None,
-            "result": result.to_dict()
-        })
+        self.history.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "query": query_text,
+                "answer": result.answer.answer if result.answer else None,
+                "result": result.to_dict(),
+            }
+        )
 
     def _display_parsed_query(self, parsed_query: Any):
         """Display details of the parsed query."""
@@ -147,10 +141,10 @@ class QueryInterface:
         table.add_row("Intent", str(parsed_query.intent.value))
         table.add_row("Confidence", f"{parsed_query.intent_confidence:.2f}")
         table.add_row("Requires Graph", str(parsed_query.requires_graph_traversal))
-        
+
         entities = ", ".join([m.text for m in parsed_query.entity_mentions])
         table.add_row("Entities Found", entities if entities else "None")
-        
+
         console.print(table)
 
     def _display_answer(self, result: HybridRetrievalResult):
@@ -160,17 +154,21 @@ class QueryInterface:
             return
 
         console.print("\n")
-        console.print(Panel(
-            Markdown(result.answer.answer),
-            title=f"[bold green]Answer[/bold green] (Confidence: {result.answer.confidence_score:.2f})",
-            border_style="green",
-            expand=False
-        ))
-        
+        console.print(
+            Panel(
+                Markdown(result.answer.answer),
+                title=f"[bold green]Answer[/bold green] (Confidence: {result.answer.confidence_score:.2f})",
+                border_style="green",
+                expand=False,
+            )
+        )
+
         if result.answer.chunks_used:
             console.print(f"[dim]Sources: {', '.join(result.answer.chunks_used)}[/dim]")
-        
-        console.print(f"[dim]Strategy: {result.strategy_used.value} | Time: {result.retrieval_time_ms:.0f}ms[/dim]\n")
+
+        console.print(
+            f"[dim]Strategy: {result.strategy_used.value} | Time: {result.retrieval_time_ms:.0f}ms[/dim]\n"
+        )
 
     def _display_chunks(self, result: HybridRetrievalResult):
         """Display retrieved chunks."""
@@ -191,7 +189,7 @@ class QueryInterface:
                 f"{chunk.final_score:.3f}",
                 chunk.chunk_id[:8],
                 chunk.source,
-                chunk.content[:100].replace("\n", " ") + "..."
+                chunk.content[:100].replace("\n", " ") + "...",
             )
 
         console.print(table)
@@ -222,16 +220,16 @@ class QueryInterface:
         table.add_column("#", justify="right")
         table.add_column("Time")
         table.add_column("Query")
-        
+
         for i, entry in enumerate(self.history, 1):
             time_str = entry["timestamp"].split("T")[1].split(".")[0]
             table.add_row(str(i), time_str, entry["query"])
-            
+
         console.print(table)
 
     def close(self):
         """Close managers."""
-        if hasattr(self, 'neo4j'):
+        if hasattr(self, "neo4j"):
             self.neo4j.close()
 
 
@@ -240,16 +238,16 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed retrieval info")
     parser.add_argument("--query", "-q", type=str, help="Run a single query and exit")
     parser.add_argument("--export", "-e", type=str, help="Path to export results (JSON)")
-    
+
     args = parser.parse_args()
 
     interface = QueryInterface(verbose=args.verbose)
-    
+
     try:
         if args.query:
             interface.process_query(args.query)
             if args.export:
-                with open(args.export, 'w') as f:
+                with open(args.export, "w") as f:
                     json.dump(interface.history, f, indent=2)
                 console.print(f"[green]Results exported to {args.export}[/green]")
         else:

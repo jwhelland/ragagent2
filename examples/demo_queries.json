@@ -1,0 +1,27 @@
+[
+  {
+    "query": "What are the main goals of the Perseverance rover?",
+    "expected_entities": ["Perseverance", "Mars", "NASA", "JPL"],
+    "expected_insight": "The Perseverance rover aims to search for signs of ancient life and collect samples for future return to Earth. It explores the Jezero crater."
+  },
+  {
+    "query": "How is SpaceX planning to explore Mars?",
+    "expected_entities": ["SpaceX", "Starship", "Mars", "Elon Musk"],
+    "expected_insight": "SpaceX is developing the Starship launch vehicle to transport crew and cargo to Mars, with the ultimate goal of enabling human colonization."
+  },
+  {
+    "query": "Which organizations are involved in Mars exploration?",
+    "expected_entities": ["NASA", "SpaceX", "JPL"],
+    "expected_insight": "Major organizations include NASA, its field center JPL, and the private company SpaceX."
+  },
+  {
+    "query": "What is Starship and who developed it?",
+    "expected_entities": ["Starship", "SpaceX", "Elon Musk"],
+    "expected_insight": "Starship is a fully reusable super heavy-lift launch vehicle developed by SpaceX."
+  },
+  {
+    "query": "What is the relationship between JPL and NASA?",
+    "expected_entities": ["JPL", "NASA"],
+    "expected_insight": "JPL is a NASA field center and a federally funded research and development center managed by Caltech for NASA."
+  }
+]

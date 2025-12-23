@@ -10,7 +10,7 @@ Usage:
 from datetime import datetime
 
 from src.retrieval.graph_retriever import GraphRetriever, TraversalStrategy
-from src.retrieval.query_parser import QueryParser, EntityMention, ParsedQuery, QueryIntent
+from src.retrieval.query_parser import EntityMention, ParsedQuery, QueryIntent, QueryParser
 from src.storage.neo4j_manager import Neo4jManager
 from src.storage.schemas import EntityType, RelationshipType
 from src.utils.config import Config
@@ -246,7 +246,7 @@ def demo_statistics():
     print(f"  Total chunks: {stats.get('total_chunks', 0)}")
 
     graph_config = stats.get("graph_config", {})
-    print(f"\nGraph Configuration:")
+    print("\nGraph Configuration:")
     print(f"  Max depth: {graph_config.get('max_depth', 'N/A')}")
     print(f"  Relationship types: {len(graph_config.get('relationship_types', []))}")
     print(f"  Shortest path enabled: {graph_config.get('enable_shortest_path', False)}")

@@ -1,15 +1,14 @@
 """Tests for graph retriever (Task 4.3)."""
 
 from datetime import datetime
-from typing import Any, Dict, List
-from unittest.mock import MagicMock, Mock, patch
+from typing import Any, Dict
+from unittest.mock import Mock
 
 import pytest
 
 from src.retrieval.graph_retriever import (
-    GraphPath,
-    GraphRetriever,
     GraphRetrievalResult,
+    GraphRetriever,
     ResolvedEntity,
     TraversalStrategy,
 )

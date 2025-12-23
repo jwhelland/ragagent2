@@ -346,7 +346,7 @@ If encountering OOM:
 - Reduce `pipeline.max_workers` (default: 4)
 - Reduce `embedding_batch_size` in config (default: 32)
 - Increase Docker Desktop memory limits
-- Use smaller LLM models (e.g., gpt-4o-mini instead of gpt-4)
+- Use smaller LLM models (e.g., gpt-4.1-mini instead of gpt-4)
 
 ### Embedding Dimension Mismatch
 If you see Qdrant errors about dimension mismatch:

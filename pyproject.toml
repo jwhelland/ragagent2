@@ -60,6 +60,7 @@ dev = [
     "ipython>=8.18.0",
     "jupyter>=1.0.0",
     "pytest-asyncio>=0.21.0",
+    "pytest-recording>=0.13.0",
 ]
 
 [project.scripts]
@@ -111,6 +112,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --cov=src --cov-report=term-missing --cov-report=html"
+markers = [
+    "e2e: End-to-end tests"
+]
 
 [tool.uv.sources]
 en-core-web-lg = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl" }

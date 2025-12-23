@@ -33,6 +33,7 @@ class EntityStatus(str, Enum):
     UNDER_REVIEW = "under_review"
     APPROVED = "approved"
     REJECTED = "rejected"
+    INACTIVE = "inactive"
 
 
 class ExtractionMethod(str, Enum):
@@ -50,6 +51,8 @@ class CandidateStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+    INACTIVE = "inactive"
+    MERGED_INTO_ENTITY = "merged_into_entity"
 
 
 class EntityCandidate(BaseModel):
@@ -151,6 +154,7 @@ class Entity(BaseModel):
     properties: Dict[str, Any] = Field(
         default_factory=dict, description="Additional entity properties"
     )
+    version: int = Field(default=1, description="Entity version number")
 
     @field_validator("canonical_name")
     @classmethod
@@ -414,6 +418,7 @@ class Relationship(BaseModel):
     properties: Dict[str, Any] = Field(
         default_factory=dict, description="Additional relationship properties"
     )
+    version: int = Field(default=1, description="Relationship version number")
 
     @field_validator("provenance")
     @classmethod
@@ -463,6 +468,7 @@ class Chunk(BaseModel):
     has_tables: bool = Field(default=False, description="Whether chunk contains tables")
     has_figures: bool = Field(default=False, description="Whether chunk contains figures")
     created_at: datetime = Field(default_factory=datetime.now, description="Creation timestamp")
+    version: int = Field(default=1, description="Chunk version number")
 
     def to_neo4j_dict(self) -> Dict[str, Any]:
         """Convert chunk to Neo4j-compatible dictionary."""

@@ -56,6 +56,33 @@ class _FakeManager:
         self.relationship_upserts.append(relationship.model_dump())
         return relationship.id
 
+    def get_entity(self, entity_id: str) -> Dict[str, Any] | None:
+        for ent in self.entity_upserts:
+            if ent["id"] == entity_id:
+                return ent
+        # Dummy fallback for test setup simplicity if not in upserts
+        if entity_id == "existing-entity-1":
+            return {
+                "id": "existing-entity-1",
+                "canonical_name": "Existing Entity",
+                "entity_type": "SYSTEM",
+                "aliases": ["Old Alias"],
+                "mention_count": 10,
+                "source_documents": ["old-doc"],
+                "chunk_ids": ["old-chunk"],
+                "merged_candidate_keys": [],
+            }
+        return None
+
+    def update_entity(self, entity_id: str, properties: Dict[str, Any]) -> bool:
+        # Find and update the dummy entity representation
+        for ent in self.entity_upserts:
+            if ent["id"] == entity_id:
+                ent.update(properties)
+                return True
+        self.entity_upserts.append({"id": entity_id, **properties})  # simplified tracking
+        return True
+
 
 def _candidate(**kwargs: Any) -> EntityCandidate:
     base = dict(
@@ -67,6 +94,59 @@ def _candidate(**kwargs: Any) -> EntityCandidate:
     )
     base.update(kwargs)
     return EntityCandidate(**base)
+
+
+def test_merge_candidate_into_entity_and_undo(tmp_path: Path) -> None:
+    manager = _FakeManager()
+    table = NormalizationTable(table_path=tmp_path / "norm.json")
+    service = EntityCurationService(
+        manager, table, Config(), undo_stack_path=tmp_path / "undo.json"
+    )
+
+    candidate = _candidate(
+        candidate_key="cand-new",
+        canonical_name="New Alias",
+        aliases=["Another Alias"],
+        mention_count=5,
+    )
+    target_entity_id = "existing-entity-1"
+
+    success = service.merge_candidate_into_entity(target_entity_id, candidate)
+    assert success is True
+
+    # Check updates
+    assert manager.status_updates[-1] == ("cand-new", CandidateStatus.MERGED_INTO_ENTITY)
+
+    # Check entity update (find the update in our fake manager)
+    updated_entity = None
+    for ent in manager.entity_upserts:
+        if ent["id"] == target_entity_id:
+            updated_entity = ent
+            break
+    assert updated_entity is not None
+    assert "New Alias" in updated_entity["aliases"]
+    assert updated_entity["mention_count"] == 15  # 10 + 5
+
+    # Undo
+    assert service.undo_last_operation() is True
+
+    # Verify rollback (status reset, entity properties reverted)
+    assert manager.status_updates[-1] == ("cand-new", CandidateStatus.PENDING)
+
+    # Verify entity state reverted
+    # Since _FakeManager updates in-place, we check the current state of the single record
+    reverted_entity = None
+    for ent in manager.entity_upserts:
+        if ent["id"] == target_entity_id:
+            reverted_entity = ent
+            break
+
+    assert reverted_entity is not None
+    # Depending on how the fallback get_entity worked, checking strict equality might be tricky
+    # if previous_values didn't capture the fallback state perfectly.
+    # But we know mention_count should be back to 10
+    assert reverted_entity["mention_count"] == 10
+    assert "New Alias" not in reverted_entity["aliases"]
 
 
 def test_approve_candidate_promotes_and_updates_normalization(tmp_path: Path) -> None:

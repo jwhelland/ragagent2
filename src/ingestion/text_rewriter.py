@@ -128,6 +128,8 @@ class TextRewriter:
         """
         provider = self.llm.provider
 
+        logger.info(f"Calling LLM for text rewriting using {provider}: {self.llm.model}")
+
         system = str(self.prompt.get("system", "")).strip()
         user_tmpl = str(self.prompt.get("user_template", "{text}"))
         user = user_tmpl.format(text=text, **metadata)
@@ -150,8 +152,6 @@ class TextRewriter:
         client = OpenAI(**client_kwargs)
         resp = client.chat.completions.create(
             model=self.llm.model,
-            temperature=self.llm.temperature,
-            max_tokens=self.llm.max_tokens,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -165,8 +165,7 @@ class TextRewriter:
         client = anthropic.Anthropic()
         msg = client.messages.create(
             model=self.llm.model,
-            temperature=self.llm.temperature,
-            max_tokens=self.llm.max_tokens,
+            max_tokens=4096,
             system=system,
             messages=[{"role": "user", "content": user}],
         )
