@@ -16,7 +16,7 @@ class PatternRelationshipExtractor:
     def __init__(self, patterns_path: str | Path = "config/relationship_patterns.yaml") -> None:
         self.patterns_path = Path(patterns_path)
         self.patterns = self._load_patterns(self.patterns_path)
-        
+
         logger.info(
             f"Initialized PatternRelationshipExtractor with {len(self.patterns)} pattern groups",
             path=str(self.patterns_path)
@@ -32,7 +32,7 @@ class PatternRelationshipExtractor:
         text = getattr(chunk, "content", None)
         if text is None and isinstance(chunk, dict):
             text = chunk.get("content")
-        
+
         if not text:
             return []
 
@@ -44,7 +44,7 @@ class PatternRelationshipExtractor:
         for group in self.patterns:
             rel_type = group.get("relationship_type", "RELATED_TO")
             regex_list = group.get("patterns", [])
-            
+
             for pattern_str in regex_list:
                 try:
                     # Using case-insensitive matching
@@ -54,7 +54,7 @@ class PatternRelationshipExtractor:
                         source = groups.get("source", "").strip()
                         target = groups.get("target", "").strip()
 
-                        if source and target and source != target:
+                        if source and target and source.lower() != target.lower():
                             # Basic filtering: ignore if source/target are too long (likely false positive)
                             if len(source) > 50 or len(target) > 50:
                                 continue
@@ -82,7 +82,7 @@ class PatternRelationshipExtractor:
         if not path.exists():
             logger.warning(f"Relationship patterns file not found: {path}")
             return []
-        
+
         try:
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             return data.get("patterns", [])
