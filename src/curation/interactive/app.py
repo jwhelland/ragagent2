@@ -1051,8 +1051,9 @@ class ReviewApp(App):
                 msg = f"✓ Merged {len(all_candidates)} candidates into: {primary.canonical_name}"
                 try:
                     # Get issues for the newly created entity (we use the primary's name/aliases as proxy)
-                    # Note: Ideally we'd use the entity_id from result.merged_entities, but getting the name is easier via primary
-                    if result.merged_entities:
+                    merged_entity_id = result.merged_entities[0] if result.merged_entities else None
+
+                    if merged_entity_id:
                         # Scan neighborhood
                         self.call_from_thread(
                             self.notify,
@@ -1062,12 +1063,19 @@ class ReviewApp(App):
                         issues = get_neighborhood_issues(
                             service, primary.canonical_name, primary.aliases
                         )
-                        self.call_from_thread(
-                            self._handle_entity_approved_ui,
-                            msg,
-                            issues,
-                        )
-                        return
+
+                        if issues:
+                            self.call_from_thread(
+                                self._handle_entity_approved_ui,
+                                msg,
+                                issues,
+                            )
+                            return
+                        else:
+                            logger.info(f"No neighborhood issues found for merged entity {merged_entity_id}")
+                    else:
+                        logger.warning("No merged entity ID returned from batch operation")
+
                 except Exception as e:
                     logger.error(f"Failed to check neighborhood issues after merge: {e}")
 
