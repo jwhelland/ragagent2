@@ -52,6 +52,27 @@ uv run ragagent-ingest --directory data/raw --dry-run
 uv run ragagent-ingest notes.md --include-text
 ```
 
+### Incremental Updates
+
+Handle document additions, modifications, and deletions without full re-ingestion:
+
+```bash
+# Scan for changes and update system
+uv run ragagent-update data/raw
+
+# Dry run to see what would change
+uv run ragagent-update data/raw --dry-run
+
+# Limit to specific file extensions
+uv run ragagent-update data/raw --extensions .pdf .txt
+```
+
+The update system will:
+- Detect new files and ingest them
+- Detect modified files (by content checksum) and re-ingest them
+- Detect deleted files and remove them from the knowledge graph and vector store
+- Preserve approved entities and relationships where possible
+
 ### Entity Discovery and Curation
 ```bash
 # Generate entity discovery report
@@ -60,7 +81,7 @@ uv run ragagent-discover --min-confidence 0.7 --max-candidates 500
 # Discovery with semantic merge suggestions
 uv run ragagent-discover --enable-semantic-merge
 
-# Review entity candidates (interactive CLI)
+# Review entity candidates (Typer-based CLI)
 uv run ragagent-review
 
 # Common review commands:
@@ -75,13 +96,51 @@ uv run ragagent-review batch-approve --min-confidence 0.9 --dry-run
 uv run ragagent-review normalization queue
 uv run ragagent-review normalization show "<canonical>"
 uv run ragagent-review normalization search "<term>"
+
+# Launch interactive TUI (Textual-based interface)
+uv run ragagent-review-interactive
+
+# Features:
+# - Three-panel layout: Candidate list | Details | Context
+# - Keyboard shortcuts for fast navigation (press ? for help)
+# - Batch operations (approve/reject multiple candidates)
+# - Entity search and merge preview
+# - Neighborhood issue detection and resolution
+# - Session tracking with undo capability
 ```
+
+**Session Tracking**: The interactive TUI tracks approval/rejection sessions with:
+- Timestamped decision history
+- Undo capability for recent actions
+- Session statistics (approved/rejected/skipped counts)
+
+### Retrieval and Querying
+
+Query the knowledge graph using hybrid retrieval:
+
+```bash
+# Interactive query loop
+uv run ragagent-query
+
+# Single query and exit
+uv run ragagent-query --query "What are the core components of the power system?"
+
+# Verbose output (shows query analysis and retrieved chunks)
+uv run ragagent-query -v -q "How does the battery health check procedure work?"
+
+# Export results to JSON
+uv run ragagent-query -q "Thermal control dependencies" --export results.json
+```
+
+The query system uses hybrid retrieval combining:
+- Vector similarity search (Qdrant)
+- Graph traversal (Neo4j)
+- LLM-based response generation with source citations
 
 ### Testing and Code Quality
 ```bash
 # Run all tests with coverage
 uv run pytest
-# Or: uv run pytest
 
 # Run specific test file
 uv run pytest tests/test_ingestion/test_pdf_parser.py
@@ -94,7 +153,6 @@ uv run black src/ tests/
 
 # Linting
 uv run ruff check src/ tests/
-
 ```
 
 ### Docker Management
@@ -144,8 +202,8 @@ The ingestion pipeline (`src/pipeline/ingestion_pipeline.py`) orchestrates:
 **Curation Flow**:
 - Extraction creates `EntityCandidate` and `RelationshipCandidate` nodes in Neo4j
 - Each candidate has `status` (pending/approved/rejected/merged), `candidate_key` (deterministic ID), provenance tracking
-- Review interface (`ragagent-review`) allows manual approval/rejection/merging
-- Approved candidates can be promoted to actual Entity nodes (not yet implemented in Phase 3)
+- Review interface (`ragagent-review` or `ragagent-review-interactive`) allows manual approval/rejection/merging
+- Approved candidates can be promoted to actual Entity nodes
 
 ### Module Organization
 
@@ -179,7 +237,19 @@ src/
 ├── curation/            # Manual review interface
 │   ├── review_interface.py   # Typer-based CLI
 │   ├── entity_approval.py    # Approval/rejection logic
-│   └── batch_operations.py   # Batch processing utilities
+│   ├── batch_operations.py   # Batch processing utilities
+│   └── interactive/          # Textual-based TUI
+│       ├── app.py                # Main TUI application
+│       ├── widgets/              # Custom widgets (command palette, context panel, etc.)
+│       ├── keybindings.py        # Keyboard shortcuts
+│       ├── session_tracker.py    # Session state and undo
+│       └── preferences.py        # User preferences
+│
+├── retrieval/           # Query parsing and hybrid retrieval
+│   ├── query_parser.py       # Natural language query analysis
+│   ├── vector_retriever.py   # Qdrant-based semantic search
+│   ├── graph_retriever.py    # Neo4j graph traversal
+│   └── hybrid_retriever.py   # Combined retrieval strategy
 │
 ├── pipeline/            # Orchestration
 │   ├── ingestion_pipeline.py # Main document processing pipeline
@@ -218,6 +288,18 @@ Key config files:
 
 Access config via: `from src.utils.config import load_config; config = load_config()`
 
+**Component-Specific Overrides**: Use double underscores in `.env` to configure specific components:
+```bash
+# Override extraction LLM
+EXTRACTION__LLM__PROVIDER=openai
+EXTRACTION__LLM__MODEL=gpt-4.0
+EXTRACTION__LLM__TEMPERATURE=0.0
+
+# Override text rewriting LLM
+INGESTION__TEXT_REWRITING__LLM__PROVIDER=anthropic
+INGESTION__TEXT_REWRITING__LLM__MODEL=claude-3-5-sonnet-20241022
+```
+
 ### Extraction Strategy
 
 **Dual Extraction (spaCy + LLM)**:
@@ -237,7 +319,7 @@ Access config via: `from src.utils.config import load_config; config = load_conf
 
 ### Embedding Management
 
-Embeddings are generated using `fastembed` (default: BAAI/bge-small-en-v1.5, 768 dimensions).
+Embeddings are generated using `fastembed` (default: BAAI/bge-small-en-v1.5, 384 dimensions).
 
 **Important**: If you change the embedding model or dimension in `.env`:
 ```bash
@@ -268,6 +350,35 @@ Embedding cache is stored in memory during pipeline execution, cleared on close.
 - Custom relationships between entities (CONTAINS, DEPENDS_ON, etc.)
 
 ## Development Guidelines
+
+### Code Style and Conventions
+
+**Python Standards**:
+- Python 3.12+, 4-space indents, max line length 100 (Black/Ruff enforced)
+- Naming: `snake_case` for modules/functions, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants
+- Type hints required (`disallow_untyped_defs=true`)
+- Imports sorted by Ruff (E, W, F, I, N, UP rules enabled)
+
+**Code Organization**:
+- Keep side effects thin and injectable
+- Isolate retrieval and ingestion logic to enable mocking in tests
+- Add new features inside existing domain modules (src/ingestion, src/extraction, etc.) rather than creating new top-level packages
+- Extend CLI helpers in scripts/ rather than duplicating logic
+- Import style: Use `from src.module import Class` (not relative imports)
+- Pydantic models for everything: Use Pydantic BaseModel, not dataclasses
+
+**Testing**:
+- Place tests in `tests/`; mirror `src/` layout for new modules
+- Filenames `test_*.py`, functions `test_*`
+- Mock Neo4j/Qdrant/LLMs in unit tests
+- Target coverage on touched code paths
+- Add regression tests for bug fixes
+
+**Commit Guidelines**:
+- Use short, imperative commit messages (e.g., `add qdrant schema helper`, `fix ingestion batch logging`)
+- Keep each commit focused
+- Before PRs: run `pytest`, `black`, `ruff`
+- Call out required migrations or data backfills in PR descriptions
 
 ### Adding New Entity Types
 1. Add to `extraction.entity_types` in `config/config.yaml`
@@ -359,16 +470,11 @@ uv run ragagent-setup --recreate-qdrant
 
 - **Uses `uv` package manager**: Always prefix commands with `uv run` to ensure correct environment
 - **Checksum-based idempotency**: Re-ingesting same file (same content) is a no-op unless `--force-reingest`
-- **Entity curation is manual**: Extracted entities start as candidates; use `ragagent-review` to approve/reject
+- **Entity curation is manual**: Extracted entities start as candidates; use `ragagent-review` or `ragagent-review-interactive` to approve/reject
 - **Text rewriting is disabled by default**: Enable in config if needed (adds latency)
 - **Neo4j APOC required**: Docker Compose config includes APOC plugin; don't use vanilla Neo4j
 - **Python 3.12+ required**: Uses modern type hints and features
-- **AGENTS.md exists**: Contains agent-specific guidelines; consult for detailed conventions
-- **Import style**: Use `from src.module import Class` (not relative imports)
-- **Pydantic models for everything**: Use Pydantic BaseModel, not dataclasses
-- Always use context7 when I need code generation, setup or configuration steps, or
-library/API documentation. This means you should automatically use the Context7 MCP
-tools to resolve library id and get library docs without me having to explicitly ask.
+- **Context7 integration**: Always use context7 MCP tools when you need code generation, setup or configuration steps, or library/API documentation. This means you should automatically use the Context7 MCP tools to resolve library id and get library docs without me having to explicitly ask.
 
 ## Reference Documentation
 
@@ -377,3 +483,4 @@ tools to resolve library id and get library docs without me having to explicitly
 - Neo4j schema: `docs/neo4j_schema_implementation.md`
 - Qdrant operations: `docs/qdrant_manager_guide.md`
 - Enhancements: `plans/enhancements-summary.md`
+- Testing guide: `docs/TESTING.md`
