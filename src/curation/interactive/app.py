@@ -1032,7 +1032,7 @@ class ReviewApp(App):
 
             # Execute merge via batch_merge_clusters
             all_candidates = [primary] + duplicates
-            batch_service.batch_merge_clusters([[primary] + duplicates])
+            result = batch_service.batch_merge_clusters([[primary] + duplicates])
 
             def on_success() -> None:
                 # Record merge in session statistics
@@ -1047,9 +1047,34 @@ class ReviewApp(App):
                 self.selected_candidate_ids.clear()
                 self.selection_mode = False
 
+                # Check for neighborhood issues
+                msg = f"✓ Merged {len(all_candidates)} candidates into: {primary.canonical_name}"
+                try:
+                    # Get issues for the newly created entity (we use the primary's name/aliases as proxy)
+                    # Note: Ideally we'd use the entity_id from result.merged_entities, but getting the name is easier via primary
+                    if result.merged_entities:
+                        # Scan neighborhood
+                        self.call_from_thread(
+                            self.notify,
+                            "Scanning neighborhood for connections...",
+                            timeout=2,
+                        )
+                        issues = get_neighborhood_issues(
+                            service, primary.canonical_name, primary.aliases
+                        )
+                        self.call_from_thread(
+                            self._handle_entity_approved_ui,
+                            msg,
+                            issues,
+                        )
+                        return
+                except Exception as e:
+                    logger.error(f"Failed to check neighborhood issues after merge: {e}")
+
+                # Fallback if no issues or error
                 self.load_candidates(
                     preserve_index=True,
-                    notification=f"✓ Merged {len(all_candidates)} candidates into: {primary.canonical_name}",
+                    notification=msg,
                     show_loaded_notification=False,
                 )
 
@@ -1173,10 +1198,36 @@ class ReviewApp(App):
 
                 def on_success() -> None:
                     self.session_tracker.record_merge()
-                    self.notify(
-                        f"✓ Merged into entity: {entity_data.get('canonical_name')}",
-                        severity="information",
-                    )
+                    entity_name = entity_data.get('canonical_name', 'entity')
+                    msg = f"✓ Merged into entity: {entity_name}"
+
+                    try:
+                        # Check neighborhood for the target entity
+                        # We need the entity's aliases. Since we don't have the full object here easily,
+                        # we rely on the candidate's name/aliases which were just added to it.
+                        self.call_from_thread(
+                            self.notify,
+                            "Scanning neighborhood for connections...",
+                            timeout=2,
+                        )
+                        # We use the candidate's info as the "new" identifiers added to the entity
+                        issues = get_neighborhood_issues(
+                            service, candidate.canonical_name, candidate.aliases
+                        )
+                        # Also check the target entity name itself
+                        issues.extend(get_neighborhood_issues(
+                            service, entity_name, []
+                        ))
+
+                        self.call_from_thread(
+                            self._handle_entity_approved_ui,
+                            msg,
+                            issues,
+                        )
+                        return
+                    except Exception as e:
+                        logger.error(f"Failed to check neighborhood issues after merge-into: {e}")
+
                     self.load_candidates(preserve_index=True, show_loaded_notification=False)
 
                 self.call_from_thread(on_success)
