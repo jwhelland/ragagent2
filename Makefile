@@ -71,6 +71,9 @@ backfill-relationships: ## Promote RelationshipCandidates into graph edges
 cleanup-relationships: ## Bulk promote/reject pending relationships (see scripts/cleanup_relationships.py)
 	$(UV) run --offline python scripts/cleanup_relationships.py --help
 
+reset-databases: ## Delete ALL data from Neo4j and Qdrant (prompts for confirmation)
+	$(UV) run --offline python scripts/reset_databases.py
+
 clean-normalization: ## Delete normalization table JSON (recommended when resetting Neo4j)
 	rm -f "$(NORM_TABLE)"
 
