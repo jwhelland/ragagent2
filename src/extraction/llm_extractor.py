@@ -15,7 +15,6 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 
 import yaml
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field
 
 from src.extraction.models import ExtractedEntity, ExtractedRelationship
 from src.utils.config import LLMConfig
@@ -349,7 +348,12 @@ class LLMExtractor:
             source = str(item.get("source") or item.get("from") or "").strip()
             target = str(item.get("target") or item.get("to") or "").strip()
             rel_type = str(item.get("type") or item.get("relationship") or "").strip()
+
             if not source or not target or not rel_type:
+                continue
+
+            # Skip self-loops (relationships to self)
+            if source.lower() == target.lower():
                 continue
 
             description = str(item.get("description", "") or "").strip()
