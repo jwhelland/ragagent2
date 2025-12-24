@@ -124,18 +124,13 @@ class ReviewApp(App):
         + STATUS_BAR_CSS
     )
 
-    BINDINGS = ALL_BINDINGS + [
-        Binding("t", "toggle_review_mode", "Toggle Mode", show=True),
-    ]
+    BINDINGS = ALL_BINDINGS
 
     # Reactive attributes for application state
     is_loading: reactive[bool] = reactive(True, recompose=True)
-    candidates: reactive[List[EntityCandidate | RelationshipCandidate]] = reactive(
-        [], recompose=True
-    )
+    candidates: reactive[List[EntityCandidate]] = reactive([], recompose=True)
     current_index: reactive[int] = reactive(0)
     filter_status: reactive[str] = reactive("pending")
-    review_mode: reactive[str] = reactive("entities")  # "entities" or "relationships"
     approved_count: reactive[int] = reactive(0)
     rejected_count: reactive[int] = reactive(0)
     edited_count: reactive[int] = reactive(0)
@@ -180,7 +175,7 @@ class ReviewApp(App):
             self._startup_error = f"Failed to load config: {e}"
 
     @property
-    def current_candidate(self) -> Optional[EntityCandidate | RelationshipCandidate]:
+    def current_candidate(self) -> Optional[EntityCandidate]:
         """Get the currently selected candidate."""
         if 0 <= self.current_index < len(self.candidates):
             return self.candidates[self.current_index]
@@ -351,37 +346,20 @@ class ReviewApp(App):
 
             try:
                 candidates = []
-                if self.review_mode == "entities":
-                    results = manager.get_entity_candidates(
-                        status=self.filter_status if self.filter_status != "all" else None,
-                        limit=50,  # Pagination - fetch 50 at a time
-                        offset=0,
-                    )
-                    # Convert to EntityCandidate objects
-                    for i, r in enumerate(results):
-                        try:
-                            candidates.append(EntityCandidate.model_validate(r))
-                        except Exception as validation_error:
-                            logger.error(
-                                f"Failed to validate candidate {i}: {validation_error}\nData: {r}"
-                            )
-                            continue
-                else:
-                    # Relationship candidates
-                    results = manager.get_relationship_candidates(
-                        status=self.filter_status if self.filter_status != "all" else None,
-                        limit=50,
-                        offset=0,
-                    )
-                    # Convert to RelationshipCandidate objects
-                    for i, r in enumerate(results):
-                        try:
-                            candidates.append(RelationshipCandidate.model_validate(r))
-                        except Exception as validation_error:
-                            logger.error(
-                                f"Failed to validate relationship candidate {i}: {validation_error}\nData: {r}"
-                            )
-                            continue
+                results = manager.get_entity_candidates(
+                    status=self.filter_status if self.filter_status != "all" else None,
+                    limit=50,  # Pagination - fetch 50 at a time
+                    offset=0,
+                )
+                # Convert to EntityCandidate objects
+                for i, r in enumerate(results):
+                    try:
+                        candidates.append(EntityCandidate.model_validate(r))
+                    except Exception as validation_error:
+                        logger.error(
+                            f"Failed to validate candidate {i}: {validation_error}\nData: {r}"
+                        )
+                        continue
 
                 # Apply client-side filters if search is active
                 search_results = []
@@ -421,9 +399,9 @@ class ReviewApp(App):
 
     def _apply_filters(
         self,
-        candidates: List[EntityCandidate | RelationshipCandidate],
+        candidates: List[EntityCandidate],
         filters: SearchFilters,
-    ) -> tuple[List[EntityCandidate | RelationshipCandidate], List[int]]:
+    ) -> tuple[List[EntityCandidate], List[int]]:
         """Apply search and filter criteria to candidates.
 
         Args:
@@ -442,27 +420,18 @@ class ReviewApp(App):
                 continue
 
             # Apply entity type filter (only for entities)
-            if isinstance(candidate, EntityCandidate):
-                if filters.entity_type and candidate.candidate_type.value != filters.entity_type:
-                    continue
+            if filters.entity_type and candidate.candidate_type.value != filters.entity_type:
+                continue
 
             # Apply search text filter
             if filters.search_text:
                 search_text_lower = filters.search_text.lower()
 
-                if isinstance(candidate, EntityCandidate):
-                    name_lower = candidate.canonical_name.lower()
-                    aliases_lower = [a.lower() for a in candidate.aliases]
-                    match = search_text_lower in name_lower or any(
-                        search_text_lower in alias for alias in aliases_lower
-                    )
-                else:
-                    # Relationship search
-                    match = (
-                        search_text_lower in candidate.source.lower()
-                        or search_text_lower in candidate.target.lower()
-                        or search_text_lower in candidate.type.lower()
-                    )
+                name_lower = candidate.canonical_name.lower()
+                aliases_lower = [a.lower() for a in candidate.aliases]
+                match = search_text_lower in name_lower or any(
+                    search_text_lower in alias for alias in aliases_lower
+                )
 
                 if match:
                     # This is a search result
@@ -476,7 +445,7 @@ class ReviewApp(App):
 
     def _apply_loaded_candidates(
         self,
-        candidates: List[EntityCandidate | RelationshipCandidate],
+        candidates: List[EntityCandidate],
         target_index: int,
         notification: Optional[str],
         show_loaded_notification: bool,
@@ -542,7 +511,7 @@ class ReviewApp(App):
 
     # Selection management methods
 
-    def get_selected_candidates(self) -> List[EntityCandidate | RelationshipCandidate]:
+    def get_selected_candidates(self) -> List[EntityCandidate]:
         """Get list of currently selected candidates.
 
         Returns:
@@ -603,7 +572,7 @@ class ReviewApp(App):
         self._update_subtitle()
 
     @work(thread=True)
-    def approve_candidate(self, candidate: EntityCandidate | RelationshipCandidate) -> None:
+    def approve_candidate(self, candidate: EntityCandidate) -> None:
         """Approve a candidate and update UI.
 
         Runs in worker thread to avoid blocking UI.
@@ -613,30 +582,26 @@ class ReviewApp(App):
         """
         service = self.get_curation_service()
         try:
-            if isinstance(candidate, EntityCandidate):
-                entity_id = service.approve_candidate(candidate)
-                msg = f"✓ Approved: {candidate.canonical_name} (ID: {entity_id})"
+            entity_id = service.approve_candidate(candidate)
+            msg = f"✓ Approved: {candidate.canonical_name} (ID: {entity_id})"
 
-                try:
-                    self.call_from_thread(
-                        self.notify,
-                        "Scanning neighborhood for connections...",
-                        timeout=2,
-                    )
-                    issues = get_neighborhood_issues(
-                        service, candidate.canonical_name, candidate.aliases
-                    )
-                    self.call_from_thread(
-                        self._handle_entity_approved_ui,
-                        msg,
-                        issues,
-                    )
-                    return
-                except Exception as e:
-                    logger.error(f"Failed to check neighborhood issues: {e}")
-            else:
-                service.approve_relationship_candidate(candidate)
-                msg = f"✓ Approved: {candidate.source} -> {candidate.target}"
+            try:
+                self.call_from_thread(
+                    self.notify,
+                    "Scanning neighborhood for connections...",
+                    timeout=2,
+                )
+                issues = get_neighborhood_issues(
+                    service, candidate.canonical_name, candidate.aliases
+                )
+                self.call_from_thread(
+                    self._handle_entity_approved_ui,
+                    msg,
+                    issues,
+                )
+                return
+            except Exception as e:
+                logger.error(f"Failed to check neighborhood issues: {e}")
 
             def on_success() -> None:
                 self.session_tracker.record_approval()
@@ -714,61 +679,40 @@ class ReviewApp(App):
         """Process selected neighborhood resolutions."""
         service = self.get_curation_service()
 
-        def candidate_store_factory() -> Neo4jManager:
-            return Neo4jManager(self.config.database)
-
         try:
             count = 0
-            # Reuse logic similar to CLI recursive check, but simplified for batch processing
-            # We need a candidate store to fetch candidates by key
-            manager = candidate_store_factory()
-            manager.connect()
+            for issue in issues:
+                if issue.issue_type == "promotable":
+                    service.approve_relationship_candidate(issue.relationship_candidate)
+                    count += 1
 
-            try:
-                for issue in issues:
-                    if issue.issue_type == "promotable":
-                        service.approve_relationship_candidate(issue.relationship_candidate)
+                elif issue.issue_type == "resolvable" and issue.peer_candidate_key:
+                    cand_dict = service.manager.get_entity_candidate(issue.peer_candidate_key)
+                    if cand_dict:
+                        peer_cand = EntityCandidate.model_validate(cand_dict)
+                        service.approve_candidate(peer_cand)
+                        # Note: Not recursing in the TUI (keep it one-level deep).
                         count += 1
 
-                    elif issue.issue_type == "resolvable" and issue.peer_candidate_key:
-                        # Fetch the candidate
-                        cand_dict = manager.get_entity_candidate(issue.peer_candidate_key)
-                        if cand_dict:
-                            peer_cand = EntityCandidate.model_validate(cand_dict)
-                            service.approve_candidate(peer_cand)
-                            # Note: We are NOT recursing here in the TUI for simplicity,
-                            # or we could collect new issues and pop up another modal?
-                            # For now, let's keep it one-level deep.
-                            count += 1
+                elif issue.issue_type == "missing":
+                    # For TUI, default to CONCEPT for new peer entities.
+                    service.create_entity(
+                        issue.peer_name,
+                        EntityType.CONCEPT,
+                        description="Created during neighborhood approval",
+                        source_documents=issue.relationship_candidate.source_documents,
+                        chunk_ids=issue.relationship_candidate.chunk_ids,
+                    )
+                    count += 1
 
-                    elif issue.issue_type == "missing":
-                        # Create synthetic candidate
-                        # For TUI, we default to CONCEPT as per modal logic (or we could improve this)
-                        new_type = EntityType.CONCEPT
-                        synthetic = EntityCandidate(
-                            candidate_key=issue.peer_name.lower().replace(" ", "_"),
-                            canonical_name=issue.peer_name,
-                            candidate_type=new_type,
-                            status=CandidateStatus.PENDING,
-                            confidence_score=1.0,
-                            description="Created during neighborhood approval",
-                            source_documents=issue.relationship_candidate.source_documents,
-                            chunk_ids=issue.relationship_candidate.chunk_ids,
-                        )
-                        service.approve_candidate(synthetic)
-                        count += 1
+            def on_finish():
+                if post_notification:
+                    self.notify(post_notification, severity="information")
+                self.notify(f"Resolved {count} neighborhood issues", severity="information")
+                # Reload to reflect changes (e.g. relationships might now be approved)
+                self.load_candidates(preserve_index=True, show_loaded_notification=False)
 
-                def on_finish():
-                    if post_notification:
-                        self.notify(post_notification, severity="information")
-                    self.notify(f"Resolved {count} neighborhood issues", severity="information")
-                    # Reload to reflect changes (e.g. relationships might now be approved)
-                    self.load_candidates(preserve_index=True, show_loaded_notification=False)
-
-                self.call_from_thread(on_finish)
-
-            finally:
-                manager.close()
+            self.call_from_thread(on_finish)
 
         except Exception as e:
             self.call_from_thread(
@@ -779,7 +723,7 @@ class ReviewApp(App):
 
     @work(thread=True)
     def reject_candidate(
-        self, candidate: EntityCandidate | RelationshipCandidate, reason: str = ""
+        self, candidate: EntityCandidate, reason: str = ""
     ) -> None:
         """Reject a candidate and update UI.
 
@@ -791,12 +735,8 @@ class ReviewApp(App):
         """
         service = self.get_curation_service()
         try:
-            if isinstance(candidate, EntityCandidate):
-                service.reject_candidate(candidate, reason=reason)
-                name = candidate.canonical_name
-            else:
-                service.reject_relationship_candidate(candidate, reason=reason)
-                name = f"{candidate.source} -> {candidate.target}"
+            service.reject_candidate(candidate, reason=reason)
+            name = candidate.canonical_name
 
             def on_success() -> None:
                 self.session_tracker.record_rejection()
@@ -818,7 +758,7 @@ class ReviewApp(App):
             service.manager.close()
 
     @work(thread=True)
-    def flag_candidate(self, candidate: EntityCandidate | RelationshipCandidate) -> None:
+    def flag_candidate(self, candidate: EntityCandidate) -> None:
         """Flag a candidate for later review.
 
         This is implemented as a temporary status change until proper
@@ -827,11 +767,7 @@ class ReviewApp(App):
         Args:
             candidate: The candidate to flag
         """
-        name = (
-            candidate.canonical_name
-            if isinstance(candidate, EntityCandidate)
-            else f"{candidate.source} -> {candidate.target}"
-        )
+        name = candidate.canonical_name
 
         def on_flag() -> None:
             self.session_tracker.record_flag()
@@ -929,7 +865,7 @@ class ReviewApp(App):
 
     @work(thread=True)
     def batch_approve_candidates(
-        self, candidates: List[EntityCandidate | RelationshipCandidate]
+        self, candidates: List[EntityCandidate]
     ) -> None:
         """Batch approve multiple candidates.
 
@@ -942,33 +878,21 @@ class ReviewApp(App):
             self.call_from_thread(self.notify, "No candidates to approve", severity="warning")
             return
 
-        # Split candidates by type
-        entity_candidates = [c for c in candidates if isinstance(c, EntityCandidate)]
-        rel_candidates = [c for c in candidates if isinstance(c, RelationshipCandidate)]
-
         service = self.get_curation_service()
         try:
             approved_count = 0
 
-            # 1. Handle entities using BatchCurationService
-            if entity_candidates:
-                # Use BatchCurationService for transaction support
-                batch_service = BatchCurationService(
-                    curation_service=service,
-                    config=self.config.curation if self.config else None,
-                )
+            # Use BatchCurationService for transaction support
+            batch_service = BatchCurationService(
+                curation_service=service,
+                config=self.config.curation if self.config else None,
+            )
 
-                # Execute batch approve (with checkpoint/rollback)
-                result = batch_service.batch_approve(
-                    entity_candidates, threshold=0.0
-                )  # No threshold, approve all selected
-                approved_count += len(result.approved_entities)
-
-            # 2. Handle relationships individually (for now)
-            if rel_candidates:
-                for rc in rel_candidates:
-                    service.approve_relationship_candidate(rc)
-                    approved_count += 1
+            # Execute batch approve (with checkpoint/rollback)
+            result = batch_service.batch_approve(
+                candidates, threshold=0.0
+            )  # No threshold, approve all selected
+            approved_count = len(result.approved_entities)
 
             def on_success() -> None:
                 for _ in range(approved_count):
@@ -996,7 +920,7 @@ class ReviewApp(App):
 
     @work(thread=True)
     def batch_reject_candidates(
-        self, candidates: List[EntityCandidate | RelationshipCandidate]
+        self, candidates: List[EntityCandidate]
     ) -> None:
         """Batch reject multiple candidates.
 
@@ -1018,12 +942,7 @@ class ReviewApp(App):
             try:
                 for candidate in candidates:
                     if candidate.status == CandidateStatus.PENDING:
-                        if isinstance(candidate, EntityCandidate):
-                            service.reject_candidate(candidate, reason="Batch rejection")
-                        else:
-                            service.reject_relationship_candidate(
-                                candidate, reason="Batch rejection"
-                            )
+                        service.reject_candidate(candidate, reason="Batch rejection")
                         rejected_count += 1
             except Exception as e:
                 # Rollback on error
@@ -1115,20 +1034,6 @@ class ReviewApp(App):
 
     # Action handlers (called by key bindings)
 
-    def action_toggle_review_mode(self) -> None:
-        """Toggle between entity and relationship review mode."""
-        if self.review_mode == "entities":
-            self.review_mode = "relationships"
-            self.notify("Switched to Relationship Review Mode", severity="information")
-        else:
-            self.review_mode = "entities"
-            self.notify("Switched to Entity Review Mode", severity="information")
-
-        # Clear selections and reload
-        self.selected_candidate_ids.clear()
-        self.selection_mode = False
-        self.load_candidates(show_loading=True)
-
     def action_approve_current(self) -> None:
         """Handle approve action (bound to 'a' key)."""
         if self.current_candidate:
@@ -1162,10 +1067,6 @@ class ReviewApp(App):
 
     def action_edit_current(self) -> None:
         """Handle edit action (bound to 'e' key)."""
-        if self.review_mode == "relationships":
-            self.notify("Editing relationships is not supported yet", severity="warning")
-            return
-
         if self.current_candidate and isinstance(self.current_candidate, EntityCandidate):
             original = self.current_candidate
 
@@ -1196,10 +1097,6 @@ class ReviewApp(App):
 
     def action_merge_into_entity(self) -> None:
         """Handle merge into existing entity action (bound to 'Shift+M' key)."""
-        if self.review_mode == "relationships":
-            self.notify("Merging relationships is not supported", severity="warning")
-            return
-
         if not self.current_candidate:
             self.notify("No candidate selected", severity="warning")
             return
@@ -1345,10 +1242,6 @@ class ReviewApp(App):
 
     def action_compare_with_duplicate(self) -> None:
         """Compare current candidate with first duplicate suggestion."""
-        if self.review_mode == "relationships":
-            self.notify("Duplicate comparison not supported for relationships", severity="warning")
-            return
-
         if not self.current_candidate:
             self.notify("No candidate selected", severity="warning")
             return
@@ -1789,10 +1682,6 @@ class ReviewApp(App):
 
     def action_merge_candidates(self) -> None:
         """Handle merge candidates action (bound to 'M' key)."""
-        if self.review_mode == "relationships":
-            self.notify("Merging relationships is not supported", severity="warning")
-            return
-
         if not self.selected_candidate_ids:
             self.notify(
                 "No candidates selected. Press 'v' to enter selection mode.", severity="warning"
@@ -1899,7 +1788,7 @@ class ReviewApp(App):
                     if isinstance(self.current_candidate, EntityCandidate):
                         dup_panel.update_suggestions(self.current_candidate, self.candidates)
                     else:
-                        dup_panel.clear_suggestions()  # Or implement relationship dup logic
+                        dup_panel.clear_suggestions()
                 except Exception:
                     # Panel doesn't exist yet
                     pass
@@ -1928,26 +1817,15 @@ class ReviewApp(App):
         """
         self._update_subtitle()
 
-    def watch_review_mode(self, old: str, new: str) -> None:
-        """React to review mode changes by updating subtitle."""
-        self._update_subtitle()
-
     def _update_subtitle(self) -> None:
         """Update the subtitle with current state information."""
-        mode_str = "ENTITIES" if self.review_mode == "entities" else "RELATIONSHIPS"
         parts = [
-            f"Mode: {mode_str}",
             f"Status: {self.filter_status}",
             f"Total: {len(self.candidates)}",
         ]
 
         if self.selection_mode:
             parts.append(f"[SELECTION MODE] {len(self.selected_candidate_ids)} selected")
-
-        if self.review_mode == "entities":
-            parts.append("Press 't' to switch to Relationships")
-        else:
-            parts.append("Press 't' to switch to Entities")
 
         self.sub_title = " | ".join(parts)
 

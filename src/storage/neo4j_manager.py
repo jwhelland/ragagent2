@@ -541,38 +541,50 @@ class Neo4jManager:
 
     def get_pending_relationships_with_peer_status(
         self,
-        identifiers: List[str],
+        keys: List[str],
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """
-        Find pending relationship candidates involving the given identifiers (names/aliases).
+        Find pending relationship candidates involving the given candidate-key fragments.
         Returns the relationship candidate plus the status of the *other* endpoint.
 
         Args:
-            identifiers: List of normalized names/keys identifying the 'focal' entity.
+            keys: List of normalized key fragments identifying the 'focal' entity.
         """
-        if not identifiers:
+        if not keys:
             return []
 
-        # We need to match raw source/target strings from the candidate against our list of identifiers.
-        # Since we don't know exactly how they were normalized in the candidate_key, checking source/target properties is safer.
+        # RelationshipCandidate.candidate_key is built as "<source_key>:<type>:<target_key>".
+        # Using candidate_key matching avoids brittle raw-string comparisons.
         with self.session() as session:
             query = """
             MATCH (rc:RelationshipCandidate {status: 'pending'})
-            WHERE toLower(trim(rc.source)) IN $identifiers OR toLower(trim(rc.target)) IN $identifiers
+            WHERE any(k IN $keys WHERE rc.candidate_key STARTS WITH (k + ':')
+                                OR rc.candidate_key ENDS WITH (':' + k))
 
             WITH rc,
-                 CASE WHEN toLower(trim(rc.source)) IN $identifiers THEN rc.target ELSE rc.source END as peer_name
+                 CASE
+                    WHEN any(k IN $keys WHERE rc.candidate_key STARTS WITH (k + ':')) THEN 
+                        split(rc.candidate_key, ':')[-1]
+                    ELSE 
+                        split(rc.candidate_key, ':')[0]
+                 END as peer_key,
+                 CASE
+                    WHEN any(k IN $keys WHERE rc.candidate_key STARTS WITH (k + ':')) THEN rc.target
+                    ELSE rc.source
+                 END as peer_name
 
-            // Check if peer exists as a Candidate
+            // Check if peer exists as a Candidate (match by key OR name)
             OPTIONAL MATCH (peer_cand:EntityCandidate)
-            WHERE toLower(peer_cand.canonical_name) = toLower(peer_name)
+            WHERE peer_cand.candidate_key = peer_key
+               OR toLower(peer_cand.canonical_name) = toLower(peer_name)
                OR any(a IN peer_cand.aliases WHERE toLower(a) = toLower(peer_name))
 
-            // Check if peer exists as an Approved Entity
+            // Check if peer exists as an Approved Entity (match by key OR name)
             OPTIONAL MATCH (peer_ent)
             WHERE any(l IN labels(peer_ent) WHERE l IN $entity_types)
-              AND (toLower(peer_ent.canonical_name) = toLower(peer_name)
+              AND (peer_ent.candidate_key = peer_key
+                   OR toLower(peer_ent.canonical_name) = toLower(peer_name)
                    OR any(a IN peer_ent.aliases WHERE toLower(a) = toLower(peer_name)))
 
             RETURN rc,
@@ -584,13 +596,10 @@ class Neo4jManager:
                    peer_ent.status as peer_entity_status
             LIMIT $limit
             """
-
-            # Neo4j IN operator is case-sensitive, so we lower-case everything for the query params
-            lower_identifiers = [i.lower() for i in identifiers]
             entity_types = [et.value for et in EntityType]
 
             result = session.run(
-                query, identifiers=lower_identifiers, entity_types=entity_types, limit=limit
+                query, keys=keys, entity_types=entity_types, limit=limit
             )
 
             rows = []
@@ -906,6 +915,27 @@ class Neo4jManager:
             )
             if result.single():
                 logger.debug(f"Updated entity {entity_id}")
+                return True
+            return False
+
+    def delete_entity(self, entity_id: str) -> bool:
+        """Delete an entity node and its relationships.
+
+        This is primarily used by curation undo operations.
+        """
+        with self.session() as session:
+            query = """
+            MATCH (n {id: $entity_id})
+            WHERE any(label IN labels(n) WHERE label IN $entity_types)
+            DETACH DELETE n
+            RETURN count(n) as deleted
+            """
+            record = session.run(
+                query, entity_id=entity_id, entity_types=[et.value for et in EntityType]
+            ).single()
+            deleted = int(record["deleted"]) if record else 0
+            if deleted > 0:
+                logger.debug(f"Deleted entity {entity_id}")
                 return True
             return False
 

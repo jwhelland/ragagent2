@@ -1,6 +1,6 @@
 """Detail panel widget for displaying full entity candidate information."""
 
-from typing import Optional, Union
+from typing import Optional
 
 from rich.text import Text
 from textual.app import ComposeResult
@@ -9,7 +9,7 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
 
-from src.storage.schemas import EntityCandidate, RelationshipCandidate
+from src.storage.schemas import EntityCandidate
 
 
 class DetailSection(Static):
@@ -39,9 +39,9 @@ class DetailPanel(Widget):
     """Panel displaying detailed information about the selected candidate."""
 
     # Reactive attribute for the current candidate
-    candidate: reactive[Optional[Union[EntityCandidate, RelationshipCandidate]]] = reactive(None, recompose=True)
+    candidate: reactive[Optional[EntityCandidate]] = reactive(None, recompose=True)
 
-    def __init__(self, candidate: Optional[Union[EntityCandidate, RelationshipCandidate]] = None) -> None:
+    def __init__(self, candidate: Optional[EntityCandidate] = None) -> None:
         """Initialize detail panel.
 
         Args:
@@ -63,10 +63,9 @@ class DetailPanel(Widget):
                 # Core information
                 yield self._render_core_info()
 
-                if isinstance(self.candidate, EntityCandidate):
-                    # Aliases
-                    if self.candidate.aliases:
-                        yield self._render_aliases()
+                # Aliases
+                if self.candidate.aliases:
+                    yield self._render_aliases()
 
                 # Description
                 if self.candidate.description:
@@ -84,21 +83,14 @@ class DetailPanel(Widget):
                 if self.candidate.provenance_events:
                     yield self._render_provenance()
 
-                if isinstance(self.candidate, EntityCandidate):
-                    # Conflicting types (if any)
-                    if self.candidate.conflicting_types:
-                        yield self._render_conflicting_types()
+                # Conflicting types (if any)
+                if self.candidate.conflicting_types:
+                    yield self._render_conflicting_types()
 
     def _render_header(self) -> Static:
         """Render the header with candidate name."""
         text = Text()
-        
-        if isinstance(self.candidate, EntityCandidate):
-            text.append(f"\n{self.candidate.canonical_name}\n", style="bold white on blue")
-        else:
-            # Relationship header
-            text.append(f"\n{self.candidate.source} -> {self.candidate.target}\n", style="bold white on magenta")
-
+        text.append(f"\n{self.candidate.canonical_name}\n", style="bold white on blue")
         text.append(f"ID: {self.candidate.id or self.candidate.candidate_key}\n", style="dim")
         return Static(text, classes="detail-header")
 
@@ -114,12 +106,8 @@ class DetailPanel(Widget):
 
         text = Text()
         
-        if isinstance(self.candidate, EntityCandidate):
-            text.append("Type: ", style="bold")
-            text.append(f"{self.candidate.candidate_type.value}\n", style="cyan")
-        else:
-            text.append("Type: ", style="bold")
-            text.append(f"{self.candidate.type}\n", style="magenta")
+        text.append("Type: ", style="bold")
+        text.append(f"{self.candidate.candidate_type.value}\n", style="cyan")
 
         text.append("Status: ", style="bold")
         status_style = {
@@ -147,7 +135,6 @@ class DetailPanel(Widget):
 
     def _render_aliases(self) -> DetailSection:
         """Render aliases section."""
-        # Only called for EntityCandidate
         aliases_text = "\n".join(f"  • {alias}" for alias in self.candidate.aliases)
         return DetailSection(
             f"Aliases ({len(self.candidate.aliases)})",
@@ -237,7 +224,7 @@ class DetailPanel(Widget):
         )
 
     def watch_candidate(
-        self, old: Optional[Union[EntityCandidate, RelationshipCandidate]], new: Optional[Union[EntityCandidate, RelationshipCandidate]]
+        self, old: Optional[EntityCandidate], new: Optional[EntityCandidate]
     ) -> None:
         """React to candidate changes by recomposing.
 
@@ -248,7 +235,7 @@ class DetailPanel(Widget):
         # Recomposition happens automatically due to recompose=True
         pass
 
-    def update_candidate(self, candidate: Optional[Union[EntityCandidate, RelationshipCandidate]]) -> None:
+    def update_candidate(self, candidate: Optional[EntityCandidate]) -> None:
         """Update the displayed candidate.
 
         Args:
