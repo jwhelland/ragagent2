@@ -228,24 +228,17 @@ def _handle_neighborhood_issues(
                 try:
                     new_type = EntityType(new_type_str.upper())
 
-                    # Create synthetic candidate
-                    synthetic = EntityCandidate(
-                        candidate_key=issue.peer_name.lower().replace(" ", "_"),
-                        canonical_name=issue.peer_name,
-                        candidate_type=new_type,
-                        status=CandidateStatus.PENDING,
-                        confidence_score=1.0,
+                    service.create_entity(
+                        issue.peer_name,
+                        new_type,
                         description="Created during neighborhood approval",
                         source_documents=issue.relationship_candidate.source_documents,
                         chunk_ids=issue.relationship_candidate.chunk_ids,
                     )
-
-                    # Approve it
-                    service.approve_candidate(synthetic)
                     console.print(f"[green]Created and approved entity '{issue.peer_name}'.[/green]")
                     # Recursively check new neighborhood
                     _handle_neighborhood_issues(
-                        service, store, synthetic.canonical_name, synthetic.aliases
+                        service, store, issue.peer_name, []
                     )
                 except ValueError:
                     console.print(f"[red]Invalid entity type: {new_type_str}[/red]")

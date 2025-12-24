@@ -62,6 +62,9 @@ All commands should be run using `uv run`.
 -   **Testing:** Mock external services (Neo4j, Qdrant, LLM) in unit tests. Coverage is tracked.
 -   **Architecture:** Logic should be modular and injectable. Avoid side effects in core logic modules.
 -   **Imports:** Use absolute imports (e.g., `from src.utils import ...`).
+- Always use context7 when I need code generation, setup or configuration steps, or
+library/API documentation. This means you should automatically use the Context7 MCP
+tools to resolve library id and get library docs without me having to explicitly ask.
 
 ## Core Workflows
 1.  **Ingestion:** PDF -> Text -> Chunks -> Embeddings -> Vector DB.

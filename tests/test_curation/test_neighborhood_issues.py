@@ -18,7 +18,7 @@ class _CapturingManager:
         return []
 
 
-def test_get_neighborhood_issues_includes_normalized_identifiers(tmp_path: Path) -> None:
+def test_get_neighborhood_issues_passes_candidate_key_fragments(tmp_path: Path) -> None:
     manager = _CapturingManager()
     table = NormalizationTable(table_path=tmp_path / "norm.json")
     service = EntityCurationService(manager=manager, normalization_table=table, config=Config())
@@ -26,7 +26,4 @@ def test_get_neighborhood_issues_includes_normalized_identifiers(tmp_path: Path)
     get_neighborhood_issues(service, "AC Motor", ["AC_Motor", "  AC motor  "])
 
     assert manager.last_identifiers is not None
-    assert "AC Motor" in manager.last_identifiers
-    assert "AC_Motor" in manager.last_identifiers
-    assert "  AC motor  " in manager.last_identifiers
-    assert "ac_motor" in manager.last_identifiers
+    assert manager.last_identifiers == ["ac_motor"]

@@ -6,7 +6,6 @@ Provides approve/merge/reject/edit operations plus undo + audit trail.
 from __future__ import annotations
 
 import json
-import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,6 +34,7 @@ from src.storage.schemas import (
     RelationshipProvenance,
     RelationshipType,
 )
+from src.utils.candidate_keys import normalize_candidate_key_fragment
 from src.utils.config import Config
 
 
@@ -48,6 +48,8 @@ class NormalizationCheckpoint(BaseModel):
 class StatusCheckpoint(BaseModel):
     identifier: str
     previous_status: CandidateStatus
+    candidate_key: str | None = None
+    created_relationship_id: str | None = None
 
 
 class UndoAction(BaseModel):
@@ -159,7 +161,11 @@ class EntityCurationService:
                 operation="approve_candidate",
                 entity_id=entity_id,
                 candidate_statuses=[
-                    StatusCheckpoint(identifier=identifier, previous_status=previous_status)
+                    StatusCheckpoint(
+                        identifier=identifier,
+                        previous_status=previous_status,
+                        candidate_key=candidate.candidate_key,
+                    )
                 ],
                 relationship_candidate_statuses=relationship_candidate_statuses,
                 normalization_changes=normalization_changes,
@@ -231,6 +237,65 @@ class EntityCurationService:
         )
         return updated_candidate
 
+    def create_entity(
+        self,
+        name: str,
+        entity_type: EntityType,
+        *,
+        aliases: Sequence[str] | None = None,
+        description: str = "",
+        confidence_score: float = 1.0,
+        source_documents: Sequence[str] | None = None,
+        chunk_ids: Sequence[str] | None = None,
+    ) -> str:
+        """Create a new approved entity directly (no EntityCandidate required)."""
+        aliases = list(aliases or [])
+        source_documents = list(source_documents or [])
+        chunk_ids = list(chunk_ids or [])
+
+        entity = Entity(
+            canonical_name=name,
+            entity_type=entity_type,
+            aliases=sorted(set(aliases)),
+            description=description,
+            confidence_score=confidence_score,
+            extraction_method=ExtractionMethod.MANUAL,
+            status=EntityStatus.APPROVED,
+            mention_count=1,
+            source_documents=sorted(set(source_documents)),
+            properties={"chunk_ids": sorted(set(chunk_ids)), "display_name": name},
+        )
+        entity_id = self.manager.upsert_entity(entity)
+
+        normalization_changes = self._upsert_normalization_entries(
+            entity_id=entity_id,
+            canonical_name=entity.canonical_name,
+            entity_type=entity.entity_type,
+            raw_texts=[name, *aliases],
+            status="approved",
+        )
+        relationship_candidate_statuses = self._promote_related_relationship_candidates(
+            raw_mentions=[name, *aliases]
+        )
+
+        self._push_undo(
+            UndoAction(
+                operation="create_entity",
+                entity_id=entity_id,
+                relationship_candidate_statuses=relationship_candidate_statuses,
+                normalization_changes=normalization_changes,
+            )
+        )
+        self._record_audit(
+            "create_entity",
+            {
+                "entity_id": entity_id,
+                "canonical_name": entity.canonical_name,
+                "entity_type": entity_type.value,
+            },
+        )
+        return entity_id
+
     def merge_candidates(
         self, primary: EntityCandidate, duplicates: Sequence[EntityCandidate]
     ) -> str:
@@ -271,7 +336,11 @@ class EntityCurationService:
         for candidate in all_candidates:
             identifier = self._candidate_identifier(candidate)
             previous_statuses.append(
-                StatusCheckpoint(identifier=identifier, previous_status=candidate.status)
+                StatusCheckpoint(
+                    identifier=identifier,
+                    previous_status=candidate.status,
+                    candidate_key=candidate.candidate_key,
+                )
             )
             new_status = (
                 CandidateStatus.APPROVED if candidate is primary else CandidateStatus.REJECTED
@@ -378,7 +447,11 @@ class EntityCurationService:
                 operation="merge_candidate_into_entity",
                 entity_id=entity_id,
                 candidate_statuses=[
-                    StatusCheckpoint(identifier=identifier, previous_status=previous_status)
+                    StatusCheckpoint(
+                        identifier=identifier,
+                        previous_status=previous_status,
+                        candidate_key=candidate.candidate_key,
+                    )
                 ],
                 relationship_candidate_statuses=relationship_candidate_statuses,
                 normalization_changes=normalization_changes,
@@ -407,28 +480,38 @@ class EntityCurationService:
         self.manager.update_relationship_candidate_status(identifier, CandidateStatus.APPROVED)
 
         # Try to promote immediately
-        relationship_candidate_statuses = self._promote_related_relationship_candidates(
+        promotion_statuses = self._promote_related_relationship_candidates(
             raw_mentions=[candidate.source, candidate.target]
         )
 
-        # Check if this specific candidate was promoted (it would be in the returned list)
-        is_promoted = any(
-            s.identifier == identifier and s.previous_status == CandidateStatus.APPROVED
-            for s in relationship_candidate_statuses
+        primary_checkpoint = StatusCheckpoint(
+            identifier=identifier,
+            previous_status=previous_status,
+            candidate_key=candidate.candidate_key,
         )
+        promoted_self = next(
+            (
+                s
+                for s in promotion_statuses
+                if s.candidate_key == candidate.candidate_key or s.identifier == identifier
+            ),
+            None,
+        )
+        if promoted_self:
+            primary_checkpoint.created_relationship_id = promoted_self.created_relationship_id
 
-        # Note: _promote_related_relationship_candidates actually updates the status to APPROVED
-        # again if successful, which is fine. The previous status we want to undo to is the
-        # original one (likely PENDING).
-
+        # Note: promotion may return a checkpoint for the relationship candidate itself, but it
+        # will reflect "previous_status=APPROVED" since we already approved it above. Keep the
+        # original previous_status captured in primary_checkpoint instead.
         self._push_undo(
             UndoAction(
                 operation="approve_relationship_candidate",
-                relationship_candidate_statuses=[
-                    StatusCheckpoint(identifier=identifier, previous_status=previous_status)
-                ]
-                + [s for s in relationship_candidate_statuses if s.identifier != identifier],
-                # If we promoted others (unlikely but possible if names match), include them
+                relationship_candidate_statuses=[primary_checkpoint]
+                + [
+                    s
+                    for s in promotion_statuses
+                    if s.candidate_key != candidate.candidate_key and s.identifier != identifier
+                ],
             )
         )
 
@@ -438,7 +521,7 @@ class EntityCurationService:
                 "candidate_key": candidate.candidate_key,
                 "source": candidate.source,
                 "target": candidate.target,
-                "promoted": is_promoted,
+                "promoted": bool(primary_checkpoint.created_relationship_id),
             },
         )
         return identifier
@@ -455,7 +538,11 @@ class EntityCurationService:
             UndoAction(
                 operation="reject_relationship_candidate",
                 relationship_candidate_statuses=[
-                    StatusCheckpoint(identifier=identifier, previous_status=previous_status)
+                    StatusCheckpoint(
+                        identifier=identifier,
+                        previous_status=previous_status,
+                        candidate_key=candidate.candidate_key,
+                    )
                 ],
             )
         )
@@ -472,6 +559,17 @@ class EntityCurationService:
         action = self._undo_stack.pop()
         self._persist_undo_stack()
         logger.info("Undoing curation operation {}", action.operation)
+
+        def delete_created_relationships(checkpoints: List[StatusCheckpoint]) -> None:
+            if not hasattr(self.manager, "delete_relationship"):
+                return
+            for checkpoint in checkpoints:
+                if not checkpoint.created_relationship_id:
+                    continue
+                try:
+                    self.manager.delete_relationship(checkpoint.created_relationship_id)  # type: ignore[attr-defined]
+                except Exception:  # noqa: BLE001
+                    continue
 
         if action.operation in {"approve_candidate", "merge_candidates"}:
             entity_id = action.entity_id
@@ -493,6 +591,7 @@ class EntityCurationService:
                 self.manager.update_relationship_candidate_status(
                     checkpoint.identifier, checkpoint.previous_status
                 )
+            delete_created_relationships(action.relationship_candidate_statuses)
 
         elif action.operation == "merge_candidate_into_entity":
             entity_id = action.entity_id
@@ -515,6 +614,7 @@ class EntityCurationService:
                 self.manager.update_relationship_candidate_status(
                     checkpoint.identifier, checkpoint.previous_status
                 )
+            delete_created_relationships(action.relationship_candidate_statuses)
 
         elif action.operation == "reject_candidate":
             identifier = action.identifier
@@ -527,6 +627,36 @@ class EntityCurationService:
             previous_values = action.previous_values or {}
             if isinstance(previous_values, dict):
                 self.manager.update_entity_candidate(identifier, previous_values)
+
+        elif action.operation == "approve_relationship_candidate":
+            for checkpoint in action.relationship_candidate_statuses:
+                self.manager.update_relationship_candidate_status(
+                    checkpoint.identifier, checkpoint.previous_status
+                )
+            delete_created_relationships(action.relationship_candidate_statuses)
+
+        elif action.operation == "reject_relationship_candidate":
+            for checkpoint in action.relationship_candidate_statuses:
+                self.manager.update_relationship_candidate_status(
+                    checkpoint.identifier, checkpoint.previous_status
+                )
+
+        elif action.operation == "create_entity":
+            entity_id = action.entity_id
+            if isinstance(entity_id, str):
+                self.manager.delete_entity(entity_id)
+
+            for checkpoint in action.normalization_changes:
+                if checkpoint.previous_record:
+                    self.normalization_table.restore_record(checkpoint.previous_record)
+                else:
+                    self.normalization_table.remove(checkpoint.raw_text)
+
+            for checkpoint in action.relationship_candidate_statuses:
+                self.manager.update_relationship_candidate_status(
+                    checkpoint.identifier, checkpoint.previous_status
+                )
+            delete_created_relationships(action.relationship_candidate_statuses)
 
         self._record_audit("undo", {"operation": action.operation})
         return True
@@ -585,30 +715,50 @@ class EntityCurationService:
         status: str,
     ) -> List[NormalizationCheckpoint]:
         changes: List[NormalizationCheckpoint] = []
-        seen: set[str] = set()
+
+        variants_by_key: Dict[str, List[str]] = {}
+        representative_raw_text: Dict[str, str] = {}
+        existing_by_key: Dict[str, NormalizationRecord | None] = {}
+
         for raw_text in raw_texts:
             cleaned = (raw_text or "").strip()
             if not cleaned:
                 continue
-            key = cleaned.lower()
-            if key in seen:
+            try:
+                key = self.normalization_table.normalize_key(cleaned)
+            except Exception:  # noqa: BLE001
                 continue
-            seen.add(key)
 
-            existing = self.normalization_table.lookup(cleaned)
-            checkpoint = NormalizationCheckpoint(raw_text=cleaned, previous_record=existing)
-            self.normalization_table.upsert(
-                NormalizationEntry(
-                    raw_text=cleaned,
-                    canonical_id=entity_id,
-                    canonical_name=canonical_name,
-                    entity_type=entity_type.value,
-                    method=NormalizationMethod.MANUAL,
-                    confidence=1.0,
-                    status=status,
+            variants_by_key.setdefault(key, []).append(cleaned)
+            representative_raw_text.setdefault(key, cleaned)
+            if key not in existing_by_key:
+                existing_by_key[key] = self.normalization_table.lookup(cleaned)
+
+        if not variants_by_key:
+            return []
+
+        entries: List[NormalizationEntry] = []
+        for key, variants in variants_by_key.items():
+            for variant in sorted(set(variants)):
+                entries.append(
+                    NormalizationEntry(
+                        raw_text=variant,
+                        canonical_id=entity_id,
+                        canonical_name=canonical_name,
+                        entity_type=entity_type.value,
+                        method=NormalizationMethod.MANUAL,
+                        confidence=1.0,
+                        status=status,
+                    )
+                )
+            changes.append(
+                NormalizationCheckpoint(
+                    raw_text=representative_raw_text[key],
+                    previous_record=existing_by_key.get(key),
                 )
             )
-            changes.append(checkpoint)
+
+        self.normalization_table.bulk_upsert(entries)
         return changes
 
     def _push_undo(self, action: UndoAction) -> None:
@@ -639,10 +789,7 @@ class EntityCurationService:
         )
 
     def _normalize_candidate_key(self, value: str) -> str:
-        normalized = self._string_normalizer.normalize(value).normalized
-        if not normalized:
-            normalized = (value or "").strip().lower()
-        return re.sub(r"[^a-zA-Z0-9]+", "_", normalized).strip("_").lower()
+        return normalize_candidate_key_fragment(value, normalizer=self._string_normalizer)
 
     def _promote_related_relationship_candidates(
         self, *, raw_mentions: Sequence[str]
@@ -689,13 +836,6 @@ class EntityCurationService:
                 continue
             if not (source_record.canonical_id and target_record.canonical_id):
                 continue
-            # If the normalization table points to an entity ID that doesn't exist in Neo4j
-            # (e.g., after resetting the DB without resetting the normalization table),
-            # skip promotion rather than failing the whole curation operation.
-            if not self.manager.get_entity(source_record.canonical_id):
-                continue
-            if not self.manager.get_entity(target_record.canonical_id):
-                continue
 
             try:
                 rel_type = RelationshipType(str(rc.type))
@@ -721,6 +861,9 @@ class EntityCurationService:
             )
 
             try:
+                existed = False
+                if hasattr(self.manager, "get_relationship"):
+                    existed = bool(self.manager.get_relationship(relationship_id))  # type: ignore[attr-defined]
                 self.manager.upsert_relationship(relationship)
             except Exception:  # noqa: BLE001
                 continue
@@ -729,7 +872,12 @@ class EntityCurationService:
                 rc.id or rc.candidate_key, CandidateStatus.APPROVED
             )
             status_checkpoints.append(
-                StatusCheckpoint(identifier=rc.id or rc.candidate_key, previous_status=prev_status)
+                StatusCheckpoint(
+                    identifier=rc.id or rc.candidate_key,
+                    previous_status=prev_status,
+                    candidate_key=rc.candidate_key,
+                    created_relationship_id=None if existed else relationship_id,
+                )
             )
             promoted += 1
 
@@ -792,11 +940,14 @@ def get_neighborhood_issues(
 ) -> List[NeighborhoodIssue]:
     """Identify pending relationships involving the given entity and classify the blocker."""
     raw_identifiers = [text for text in [entity_name, *aliases] if (text or "").strip()]
-    normalized_identifiers = {
-        service._normalize_candidate_key(text) for text in raw_identifiers  # noqa: SLF001
-    }
-    identifiers = list({*raw_identifiers, *normalized_identifiers})
-    raw_issues = service.manager.get_pending_relationships_with_peer_status(identifiers)
+    keys = sorted(
+        {
+            service._normalize_candidate_key(text)  # noqa: SLF001
+            for text in raw_identifiers
+            if (text or "").strip()
+        }
+    )
+    raw_issues = service.manager.get_pending_relationships_with_peer_status(keys)
 
     issues: List[NeighborhoodIssue] = []
     for row in raw_issues:

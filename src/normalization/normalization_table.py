@@ -136,6 +136,10 @@ class NormalizationTable:
         key = self._normalize_key(raw_text)
         return self._state.records.get(key)
 
+    def normalize_key(self, raw_text: str) -> str:
+        """Return the normalized key used for internal storage/lookup."""
+        return self._normalize_key(raw_text)
+
     def lookup_many(self, raw_texts: Sequence[str]) -> Dict[str, NormalizationRecord | None]:
         """Resolve a batch of mentions."""
         return {text: self.lookup(text) for text in raw_texts}

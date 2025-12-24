@@ -1190,12 +1190,9 @@ class IngestionPipeline:
         return total
 
     def _normalize_candidate_key(self, value: str) -> str:
-        normalized = ""
-        if self.string_normalizer:
-            normalized = self.string_normalizer.normalize(value).normalized
-        if not normalized:
-            normalized = (value or "").strip().lower()
-        return re.sub(r"[^a-zA-Z0-9]+", "_", normalized).strip("_").lower()
+        from src.utils.candidate_keys import normalize_candidate_key_fragment
+
+        return normalize_candidate_key_fragment(value, normalizer=self.string_normalizer)
 
     def _candidate_key(self, type_label: str, canonical_normalized: str, fallback: str) -> str:
         base = canonical_normalized or fallback

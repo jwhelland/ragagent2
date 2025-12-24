@@ -35,7 +35,7 @@ class _FakeManager:
         return True
 
     def get_relationship_candidates_involving_keys(
-        self, keys: List[str], *, status: str = "pending", limit: int = 200
+        self, keys: List[str], *, statuses: List[str] | None = None, limit: int = 200
     ) -> List[Dict[str, Any]]:
         return list(self.relationship_candidate_rows)
 

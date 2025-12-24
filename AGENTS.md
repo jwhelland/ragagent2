@@ -5,6 +5,9 @@
 - CLI helpers are in `scripts/` (e.g., `scripts/setup_databases.py`, `scripts/ingest_documents.py`); extend them rather than duplicating logic.
 - Configuration is in `config/` (`config.yaml`, cleaning/prompt files); data inputs/outputs stay under `data/` (`raw/`, `processed/`, `entities/`, `normalization/`). Tests live in `tests/` mirroring `src/`.
 - Architecture and planning notes belong in `plans/`; keep design intent there when changing flows or schemas.
+- Always use context7 when I need code generation, setup or configuration steps, or
+library/API documentation. This means you should automatically use the Context7 MCP
+tools to resolve library id and get library docs without me having to explicitly ask.
 
 ## Build, Test, and Development Commands
 - Setup: `uv sync` (uses `uv.lock`), then run tools via `uv run ...`.

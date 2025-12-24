@@ -86,12 +86,13 @@ def test_approve_recursive_flow(mock_dependencies):
     mock_service.approve_candidate.assert_any_call(peer_candidate)
     
     # 3. Peer B Created and Approved
-    # We need to find the call with the synthetic candidate
-    calls = mock_service.approve_candidate.call_args_list
-    peer_b_call = next((c for c in calls if c[0][0].canonical_name == "Peer B"), None)
-    assert peer_b_call is not None
-    assert peer_b_call[0][0].candidate_type == EntityType.CONCEPT
-    assert peer_b_call[0][0].description == "Created during neighborhood approval"
+    mock_service.create_entity.assert_any_call(
+        "Peer B",
+        EntityType.CONCEPT,
+        description="Created during neighborhood approval",
+        source_documents=rc2.source_documents,
+        chunk_ids=rc2.chunk_ids,
+    )
 
     # Verify Output
     assert "Approved Main" in result.stdout

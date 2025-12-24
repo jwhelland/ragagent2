@@ -366,6 +366,9 @@ uv run ragagent-setup --recreate-qdrant
 - **AGENTS.md exists**: Contains agent-specific guidelines; consult for detailed conventions
 - **Import style**: Use `from src.module import Class` (not relative imports)
 - **Pydantic models for everything**: Use Pydantic BaseModel, not dataclasses
+- Always use context7 when I need code generation, setup or configuration steps, or
+library/API documentation. This means you should automatically use the Context7 MCP
+tools to resolve library id and get library docs without me having to explicitly ask.
 
 ## Reference Documentation
 
