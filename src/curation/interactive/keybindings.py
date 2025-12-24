@@ -26,6 +26,7 @@ ACTION_BINDINGS = [
 # Search and filter bindings
 SEARCH_BINDINGS = [
     Binding("/", "search", "Search", show=True, priority=False),
+    Binding("p", "command_palette", "Palette", show=True, priority=False),
     Binding("n", "next_search", "Next", show=False),
     Binding("N", "prev_search", "Previous", show=False),
     Binding("colon", "command_mode", "Command", show=True, priority=False),

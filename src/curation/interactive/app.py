@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from textual import work
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -28,12 +28,13 @@ from src.curation.interactive.widgets import (
     CandidateList,
     CommandModalScreen,
     ComparisonModalScreen,
+    ContextPanel,
     DetailPanel,
-    DuplicateSuggestionsPanel,
     EditModalScreen,
     EntityCandidateMergePreviewModal,
     EntitySearchModal,
     MergePreviewModal,
+    NeighborhoodIssueRow,
     NeighborhoodResolutionModal,
     PrimarySelectionModal,
     SearchFilters,
@@ -91,7 +92,7 @@ class ReviewApp(App):
         padding: 1;
     }
 
-    DuplicateSuggestionsPanel {
+    ContextPanel {
         width: 20%;
         height: 100%;
         border: solid $accent;
@@ -268,7 +269,7 @@ class ReviewApp(App):
             with Horizontal(id="main-container"):
                 yield CandidateList(candidates=self.candidates)
                 yield DetailPanel(candidate=self.current_candidate)
-                yield DuplicateSuggestionsPanel()
+                yield ContextPanel()
         yield StatusBar()
         yield Footer()
 
@@ -656,6 +657,11 @@ class ReviewApp(App):
             notification=msg,
             show_loaded_notification=False,
         )
+
+    @on(NeighborhoodIssueRow.Action)
+    def on_neighborhood_issue_row_action(self, event: NeighborhoodIssueRow.Action) -> None:
+        """Handle inline neighborhood actions from the ContextPanel."""
+        self.process_neighborhood_resolutions([event.issue])
 
     def _show_neighborhood_modal(self, issues: List[NeighborhoodIssue]) -> None:
         """Show the neighborhood resolution modal."""
@@ -1169,6 +1175,56 @@ class ReviewApp(App):
             SearchModalScreen(self.current_filters, on_search=self._execute_search),
             self._handle_search_result,
         )
+
+    def action_command_palette(self) -> None:
+        """Open the unified command palette (bound to 'p' key)."""
+        self.push_screen(
+            CommandPalette(self.candidates, self.config),
+            self._handle_palette_result,
+        )
+
+    def _handle_palette_result(self, result: Optional[Dict[str, Any]]) -> None:
+        """Handle the result from the command palette."""
+        if not result:
+            return
+
+        result_type = result.get("type")
+        item = result.get("item")
+
+        if result_type == "candidate":
+            # Jump to candidate index
+            index = result.get("metadata", {}).get("index")
+            if index is not None:
+                self.current_index = index
+                self.notify(f"Jumped to: {item.canonical_name}")
+
+        elif result_type == "entity":
+            # Merge current candidate into this entity
+            if self.current_candidate:
+                self._handle_merge_entity_search_result(item)
+
+        elif result_type == "command":
+            # Execute command
+            self._execute_palette_command(item)
+
+    def _execute_palette_command(self, command: str) -> None:
+        """Execute a command selected from the palette."""
+        if command == "approve":
+            self.action_approve_current()
+        elif command == "reject":
+            self.action_reject_current()
+        elif command == "edit":
+            self.action_edit_current()
+        elif command == "merge":
+            self.action_merge_candidates()
+        elif command == "merge-into":
+            self.action_merge_into_entity()
+        elif command == "filter":
+            self.action_search()
+        elif command == "undo":
+            self.action_undo_last()
+        elif command == "quit":
+            self.action_quit()
 
     def _handle_search_result(self, result: Optional[SearchFilters]) -> None:
         """Handle the result from the search modal.
@@ -1782,13 +1838,14 @@ class ReviewApp(App):
                     # Detail panel doesn't exist yet
                     pass
 
-                # Update duplicate suggestions panel
+                # Update context panel (duplicates + neighborhood)
                 try:
-                    dup_panel = self.query_one(DuplicateSuggestionsPanel)
-                    if isinstance(self.current_candidate, EntityCandidate):
-                        dup_panel.update_suggestions(self.current_candidate, self.candidates)
-                    else:
-                        dup_panel.clear_suggestions()
+                    context_panel = self.query_one(ContextPanel)
+                    context_panel.update_context(
+                        self.current_candidate,
+                        self.candidates,
+                        self.get_curation_service()
+                    )
                 except Exception:
                     # Panel doesn't exist yet
                     pass

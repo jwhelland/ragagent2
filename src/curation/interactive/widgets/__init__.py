@@ -3,7 +3,9 @@
 from .batch_modal import BatchOperationModal
 from .candidate_list import CandidateList
 from .command_modal import CommandModalScreen
+from .command_palette import CommandPalette
 from .comparison_modal import ComparisonModalScreen
+from .context_panel import ContextPanel, NeighborhoodIssueRow
 from .detail_panel import DetailPanel
 from .duplicate_suggestions import DuplicateSuggestionsPanel
 from .edit_modal import EditModalScreen
@@ -19,7 +21,9 @@ __all__ = [
     "BatchOperationModal",
     "CandidateList",
     "CommandModalScreen",
+    "CommandPalette",
     "ComparisonModalScreen",
+    "ContextPanel",
     "DetailPanel",
     "DuplicateSuggestionsPanel",
     "EditModalScreen",
