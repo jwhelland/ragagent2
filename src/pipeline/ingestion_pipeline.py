@@ -202,7 +202,10 @@ class IngestionPipeline:
             self.text_cleaner = TextCleaner(self.config.ingestion.text_cleaning)
 
         if self.text_rewriter is None and self.config.ingestion.text_rewriting.enabled:
-            self.text_rewriter = TextRewriter(self.config.ingestion.text_rewriting)
+            self.text_rewriter = TextRewriter(
+                self.config.ingestion.text_rewriting,
+                llm_config=self.config.llm.resolve("rewriting"),
+            )
 
         if self.chunker is None:
             self.chunker = HierarchicalChunker(self.config.ingestion.chunking)
@@ -265,7 +268,7 @@ class IngestionPipeline:
         if self.llm_extractor is None and self.config.extraction.enable_llm:
             try:
                 self.llm_extractor = LLMExtractor(
-                    self.config.extraction.llm,
+                    self.config.llm.resolve("extraction"),
                     prompts_path=self.config.extraction.llm_prompt_template,
                 )
             except Exception as exc:  # noqa: BLE001

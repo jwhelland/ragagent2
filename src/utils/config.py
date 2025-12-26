@@ -1,7 +1,7 @@
 """Configuration management using Pydantic for validation."""
 
 from pathlib import Path
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 import yaml
 from pydantic import Field, field_validator
@@ -53,11 +53,53 @@ class LLMConfig(BaseSettings):
         return v
 
 
+class PartialLLMConfig(BaseSettings):
+    """Partial LLM configuration for overrides."""
+
+    provider: Optional[Literal["openai", "anthropic"]] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    timeout: Optional[int] = None
+    retry_attempts: Optional[int] = None
+    base_url: Optional[str] = None
+
+    @field_validator("temperature")
+    @classmethod
+    def validate_temperature(cls, v: float | None) -> float | None:
+        """Validate temperature is between 0 and 1."""
+        if v is not None and not 0 <= v <= 1:
+            raise ValueError("Temperature must be between 0 and 1")
+        return v
+
+
+class LLMSection(BaseSettings):
+    """Top-level LLM configuration section."""
+
+    defaults: LLMConfig = Field(default_factory=LLMConfig)
+    extraction: PartialLLMConfig = Field(default_factory=PartialLLMConfig)
+    rewriting: PartialLLMConfig = Field(default_factory=PartialLLMConfig)
+    chat: PartialLLMConfig = Field(default_factory=PartialLLMConfig)
+
+    def resolve(self, section: str) -> LLMConfig:
+        """Resolve effective configuration for a specific section.
+
+        Merges defaults with section-specific overrides.
+        """
+        base = self.defaults.model_dump()
+        specific = getattr(self, section, None)
+        if specific:
+            overrides = specific.model_dump(exclude_none=True)
+            base.update(overrides)
+        return LLMConfig(**base)
+
+
 class TextRewritingConfig(BaseSettings):
     """Text rewriting configuration."""
 
+    model_config = SettingsConfigDict(extra="ignore")
+
     enabled: bool = False
-    llm: LLMConfig = Field(default_factory=LLMConfig)
     chunk_level: Literal["section", "subsection"] = "section"
     preserve_original: bool = True
     max_chunk_tokens: int = 2000
@@ -104,10 +146,11 @@ class RelationshipValidationConfig(BaseSettings):
 class ExtractionConfig(BaseSettings):
     """Entity extraction configuration."""
 
+    model_config = SettingsConfigDict(extra="ignore")
+
     enable_llm: bool = False
     llm_prompt_template: str = "config/extraction_prompts.yaml"
     spacy: SpacyConfig = Field(default_factory=SpacyConfig)
-    llm: LLMConfig = Field(default_factory=LLMConfig)
     entity_types: List[str] = Field(
         default=[
             "SYSTEM",
@@ -292,6 +335,7 @@ class Config(BaseSettings):
     )
 
     # Configuration sections
+    llm: LLMSection = Field(default_factory=LLMSection)
     ingestion: IngestionConfig = Field(default_factory=IngestionConfig)
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
     normalization: NormalizationConfig = Field(default_factory=NormalizationConfig)

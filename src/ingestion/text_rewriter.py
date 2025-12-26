@@ -46,13 +46,14 @@ class TextRewriter:
     def __init__(
         self,
         config: Optional[TextRewritingConfig] = None,
+        llm_config: Optional[LLMConfig] = None,
         prompt_path: Optional[str | Path] = None,
         *,
         enable: Optional[bool] = None,
     ) -> None:
         self.config = config or TextRewritingConfig()
         self.enabled = self.config.enabled if enable is None else enable
-        self.llm: LLMConfig = self.config.llm
+        self.llm: LLMConfig = llm_config or LLMConfig()
 
         self.prompt_path = Path(prompt_path or self.config.prompt_template)
         self.prompt = self._load_prompt(self.prompt_path)

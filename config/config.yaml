@@ -1,3 +1,27 @@
+llm:
+  defaults:
+    provider: "openai"
+    # base_url: "https://api.openai.com/v1"
+    base_url: "http://localhost:1234/v1"
+    model: "gpt-4.1-mini"
+    temperature: 0.1
+    max_tokens: 2000
+    timeout: 60
+    retry_attempts: 3
+
+  extraction:
+    model: "openai/gpt-oss-20b"
+    # model: "gpt-4.1-mini"
+
+  rewriting:
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4.1-mini"
+    temperature: 0.3
+    max_tokens: 3000
+
+  chat:
+    model: "openai/gpt-oss-20b"
+
 ingestion:
   pdf_parser:
     ocr_enabled: true
@@ -20,12 +44,6 @@ ingestion:
 
   text_rewriting:
     enabled: false
-    llm:
-      provider: "openai"
-      base_url: "https://api.openai.com/v1"
-      model: "gpt-4.1-mini"
-      temperature: 0.3
-      max_tokens: 3000
     chunk_level: "section"
     preserve_original: true
     max_chunk_tokens: 2000
@@ -50,13 +68,6 @@ extraction:
     custom_patterns: "config/entity_patterns.jsonl"
     batch_size: 100
     confidence_threshold: 0.5
-
-  llm:
-    provider: "openai"
-    base_url: "https://api.openai.com/v1"
-    # model: "gpt-4.1-mini"
-    timeout: 60
-    retry_attempts: 3
 
   entity_types:
     - SYSTEM

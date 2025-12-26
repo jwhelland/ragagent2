@@ -40,7 +40,7 @@ class ResponseGenerator:
             sleep_fn: Function for sleep during retries
         """
         self.config = config or Config.from_yaml()
-        self.llm_config = self.config.extraction.llm  # Reuse extraction LLM config or use dedicated
+        self.llm_config = self.config.llm.resolve("chat")
         self.prompts_path = Path(prompts_path)
         self.prompts = self._load_prompts(self.prompts_path)
         self._sleep = sleep_fn or time.sleep
