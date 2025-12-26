@@ -126,7 +126,7 @@ def promote_valid(
 @app.command()
 def prune_weak(
     confidence: float = 0.5,
-    type_filter: str = "RELATED_TO",
+    type_filter: str = "ALL",
     config_path: str = "config/config.yaml",
     dry_run: bool = False,
 ):

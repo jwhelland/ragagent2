@@ -154,18 +154,20 @@ class GraphRetriever:
             # Let's assume if it's empty, it's empty.
             return []
 
-        filtered = [
-            rt for rt in relationship_types if rt.value in self.existing_relationship_types
-        ]
-        
+        filtered = [rt for rt in relationship_types if rt.value in self.existing_relationship_types]
+
         if len(filtered) < len(relationship_types):
             logger.debug(
                 "Filtered relationship types",
                 original=len(relationship_types),
                 filtered=len(filtered),
-                excluded=[rt.value for rt in relationship_types if rt.value not in self.existing_relationship_types]
+                excluded=[
+                    rt.value
+                    for rt in relationship_types
+                    if rt.value not in self.existing_relationship_types
+                ],
             )
-            
+
         return filtered
 
     def retrieve(
@@ -472,7 +474,7 @@ class GraphRetriever:
             List of hierarchical paths
         """
         paths: List[GraphPath] = []
-        
+
         part_of_rels = self._filter_relationship_types([RelationshipType.PART_OF])
         contains_rels = self._filter_relationship_types([RelationshipType.CONTAINS])
 

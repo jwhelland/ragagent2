@@ -83,10 +83,10 @@ def test_promotes_approved_related_to_candidates(tmp_path: Path) -> None:
     manager.relationship_candidate_rows = [
         {
             "id": "relcand-1",
-            "candidate_key": "nasa:RELATED_TO:jet_propulsion_laboratory",
+            "candidate_key": "nasa:DEPENDS_ON:jet_propulsion_laboratory",
             "source": "NASA",
             "target": "Jet Propulsion Laboratory",
-            "type": "RELATED_TO",
+            "type": "DEPENDS_ON",
             "description": "",
             "confidence_score": 0.5,
             "status": "approved",

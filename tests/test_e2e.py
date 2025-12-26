@@ -33,9 +33,7 @@ def scrub_response_headers(response):
     headers_to_remove = {"openai-organization", "openai-project", "set-cookie"}
     if "headers" in response:
         # Create a list of keys to remove to avoid runtime error during iteration
-        keys_to_remove = [
-            k for k in response["headers"] if k.lower() in headers_to_remove
-        ]
+        keys_to_remove = [k for k in response["headers"] if k.lower() in headers_to_remove]
         for k in keys_to_remove:
             del response["headers"][k]
     return response
@@ -127,7 +125,9 @@ def test_e2e_pipeline(config, sample_data_path, demo_queries_path, check_service
     # Collect files
     supported_suffixes = {".pdf", ".md", ".txt", ".markdown"}
     files = [
-        p for p in sample_data_path.rglob("*") if p.suffix.lower() in supported_suffixes and p.is_file()
+        p
+        for p in sample_data_path.rglob("*")
+        if p.suffix.lower() in supported_suffixes and p.is_file()
     ]
 
     results = ingestion.process_batch(files, force_reingest=True)

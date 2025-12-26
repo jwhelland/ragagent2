@@ -29,7 +29,16 @@ def test_entity_approval_shows_modal_before_reload() -> None:
     app.push_screen = MagicMock()  # type: ignore[method-assign]
     app.load_candidates = MagicMock()  # type: ignore[method-assign]
 
+    rel_cand = MagicMock()
+    rel_cand.source = "A"
+    rel_cand.type = "TO"
+    rel_cand.target = "B"
+
     issue = MagicMock(spec=NeighborhoodIssue)
+    issue.relationship_candidate = rel_cand
+    issue.peer_name = "B"
+    issue.issue_type = "promotable"
+
     app._handle_entity_approved_ui("ok", [issue])
 
     app.push_screen.assert_called_once()

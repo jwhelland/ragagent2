@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
 from textual.widgets import Button, Static
 
-from src.curation.entity_approval import EntityCurationService, NeighborhoodIssue, get_neighborhood_issues
+from src.curation.entity_approval import (
+    EntityCurationService,
+    NeighborhoodIssue,
+    get_neighborhood_issues,
+)
 from src.curation.interactive.widgets.duplicate_suggestions import DuplicateSuggestion
-from src.storage.schemas import EntityCandidate
+from src.storage.schemas import EntityCandidate, RelationshipCandidate
 
 
 class NeighborhoodIssueRow(Static):
@@ -21,6 +24,7 @@ class NeighborhoodIssueRow(Static):
 
     class Action(Message):
         """Action requested on an issue."""
+
         def __init__(self, issue: NeighborhoodIssue, action_type: str) -> None:
             super().__init__()
             self.issue = issue
@@ -32,12 +36,14 @@ class NeighborhoodIssueRow(Static):
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Static(f"[bold]{self.issue.peer_name}[/bold] ({self.issue.relationship_candidate.type})")
-            
+            yield Static(
+                f"[bold]{self.issue.peer_name}[/bold] ({self.issue.relationship_candidate.type})"
+            )
+
             action_text = ""
             btn_label = ""
             btn_id = ""
-            
+
             if self.issue.issue_type == "promotable":
                 action_text = "Peer is APPROVED. Ready to promote."
                 btn_label = "Promote"
@@ -124,20 +130,26 @@ class ContextPanel(VerticalScroll):
     @work(thread=True)
     def update_context(
         self,
-        candidate: Optional[EntityCandidate],
-        all_candidates: List[EntityCandidate],
-        service: EntityCurationService
+        candidate: Optional[EntityCandidate | RelationshipCandidate],
+        all_candidates: List[EntityCandidate | RelationshipCandidate],
+        service: EntityCurationService,
     ) -> None:
         self.current_candidate = candidate
         if not candidate:
             self.app.call_from_thread(self._clear_ui)
             return
 
+        # Skip duplicate/neighborhood checks for RelationshipCandidates
+        # (these are entity-specific features)
+        if isinstance(candidate, RelationshipCandidate):
+            self.app.call_from_thread(self._clear_ui_for_relationships)
+            return
+
         # 1. Compute Duplicates (sync)
-        from src.curation.interactive.widgets.duplicate_suggestions import DuplicateSuggestionsPanel
+
         # Reuse logic from DuplicateSuggestionsPanel if possible, but here we just re-impl minimal
-        dups = self._find_duplicates(candidate, all_candidates)
-        
+        dups = self._find_duplicates(candidate, all_candidates)  # type: ignore
+
         # 2. Compute Neighborhood (requires IO)
         issues = []
         try:
@@ -159,9 +171,15 @@ class ContextPanel(VerticalScroll):
         self.mount(Static("🌐 Neighborhood", classes="section-title"))
         self.mount(Static("No candidate selected", classes="empty-msg"))
 
+    def _clear_ui_for_relationships(self) -> None:
+        """Clear UI for relationship mode (no duplicates/neighborhood features)."""
+        self.remove_children()
+        self.mount(Static("🔗 Relationship Context", classes="section-title"))
+        self.mount(Static("Relationship-specific context coming soon", classes="empty-msg"))
+
     def _refresh_ui(self) -> None:
         self.remove_children()
-        
+
         # Duplicates Section
         self.mount(Static("🔍 Duplicates", classes="section-title"))
         if not self.duplicates:
@@ -181,6 +199,7 @@ class ContextPanel(VerticalScroll):
     def _find_duplicates(self, current: EntityCandidate, all_candidates: List[EntityCandidate]):
         # Stub logic similar to duplicate_suggestions.py
         from difflib import SequenceMatcher
+
         suggestions = []
         c_name = current.canonical_name.lower()
         for c in all_candidates:

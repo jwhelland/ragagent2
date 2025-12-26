@@ -13,7 +13,6 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import spacy
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field
 from spacy.language import Language
 from spacy.matcher import PhraseMatcher
 from spacy.pipeline import EntityRuler

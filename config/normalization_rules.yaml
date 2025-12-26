@@ -28,6 +28,11 @@ punctuation_replacements:
 strip_characters:
   - "\u200b"
   - "\ufeff"
+strip_articles:
+  - "the"
+  - "a"
+  - "an"
+enable_article_stripping: true
 keep_symbols:
   - "+"
   - "#"

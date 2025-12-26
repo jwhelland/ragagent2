@@ -88,10 +88,10 @@ def test_approve_relationship_candidate_can_be_undone(tmp_path: Path) -> None:
     manager.relationship_candidate_rows = [
         {
             "id": "rc-1",
-            "candidate_key": "a:RELATED_TO:b",
+            "candidate_key": "a:DEPENDS_ON:b",
             "source": "A",
             "target": "B",
-            "type": "RELATED_TO",
+            "type": "DEPENDS_ON",
             "description": "",
             "confidence_score": 0.9,
             "status": "pending",
@@ -125,10 +125,10 @@ def test_reject_relationship_candidate_can_be_undone(tmp_path: Path) -> None:
 
     candidate = RelationshipCandidate(
         id="rc-2",
-        candidate_key="a:RELATED_TO:b",
+        candidate_key="a:DEPENDS_ON:b",
         source="A",
         target="B",
-        type="RELATED_TO",
+        type="DEPENDS_ON",
         status=CandidateStatus.PENDING,
     )
     service.reject_relationship_candidate(candidate, reason="noise")

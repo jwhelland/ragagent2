@@ -37,10 +37,10 @@ def test_promotion_skips_candidates_with_unusable_target(tmp_path: Path) -> None
     manager.relationship_candidate_rows = [
         {
             "id": "relcand-bad",
-            "candidate_key": "foo:RELATED_TO:bar",
+            "candidate_key": "foo:DEPENDS_ON:bar",
             "source": "Foo",
             "target": "!!!",  # normalizes to empty -> used to raise
-            "type": "RELATED_TO",
+            "type": "DEPENDS_ON",
             "description": "",
             "confidence_score": 0.5,
             "status": CandidateStatus.PENDING.value,

@@ -68,34 +68,27 @@ def test_llm_extractor_parses_relationships(monkeypatch: pytest.MonkeyPatch) -> 
 
     calls: Dict[str, str] = {}
 
-    def fake_anthropic(*, system: str, user: str) -> str:
+    def mock_call(system: str, user: str) -> str:
         calls["system"] = system
         calls["user"] = user
         return """
-        Preamble text before JSON.
         {
           "relationships": [
             {
               "source": "battery",
+              "source_type": "COMPONENT",
               "type": "DEPENDS_ON",
               "target": "solar_array",
-              "description": "Battery relies on solar array charging",
-              "confidence": 0.92,
-              "bidirectional": false
+              "target_type": "COMPONENT",
+              "confidence": 0.92
             }
           ]
         }
         """
 
-    monkeypatch.setattr(extractor, "_call_anthropic", fake_anthropic)
+    monkeypatch.setattr(extractor, "_call_llm", mock_call)
 
-    chunk = {
-        "content": "The battery depends on the solar array for charging during daylight.",
-        "chunk_id": "chunk-2",
-        "document_id": "doc-1",
-        "metadata": {"document_title": "Power System", "section_title": "EPS"},
-    }
-
+    chunk = {"content": "The battery depends on the solar array for charging during daylight."}
     known_entities = [
         ExtractedEntity(
             name="battery", type="COMPONENT", description="", aliases=[], confidence=0.9
@@ -106,7 +99,7 @@ def test_llm_extractor_parses_relationships(monkeypatch: pytest.MonkeyPatch) -> 
     relationships = extractor.extract_relationships(chunk, known_entities=known_entities)
 
     assert len(relationships) == 1
-    rel: LLMExtractedRelationship = relationships[0]
+    rel: ExtractedRelationship = relationships[0]
     assert rel.source == "battery"
     assert rel.target == "solar_array"
     assert rel.type == "DEPENDS_ON"

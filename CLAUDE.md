@@ -114,6 +114,31 @@ uv run ragagent-review-interactive
 - Undo capability for recent actions
 - Session statistics (approved/rejected/skipped counts)
 
+### Relationship Curation
+
+Review and curate relationship candidates extracted from documents:
+
+```bash
+# Review relationship candidates
+uv run ragagent-review relationship queue --status pending --min-confidence 0.7
+uv run ragagent-review relationship show "<id or key>"
+uv run ragagent-review relationship approve "<id or key>"
+uv run ragagent-review relationship reject "<id or key>" --reason "too vague"
+
+# Filter by relationship type
+uv run ragagent-review relationship queue --rel-type DEPENDS_ON --status pending
+
+# Batch operations for high-confidence relationships
+uv run ragagent-review relationship batch-approve --min-confidence 0.8 --dry-run
+uv run ragagent-review relationship batch-approve --min-confidence 0.8 --no-dry-run
+```
+
+**Relationship Validation**: The system automatically validates relationships during extraction:
+- Confidence threshold filtering (default: 0.5)
+- Entity existence validation with fuzzy matching
+- IS_A semantic checks (rejects adjective targets)
+- Maximum entity name length enforcement
+
 ### Retrieval and Querying
 
 Query the knowledge graph using hybrid retrieval:

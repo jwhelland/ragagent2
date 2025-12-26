@@ -30,6 +30,7 @@ __all__ = [
     "EntityCandidateMergePreviewModal",
     "EntitySearchModal",
     "MergePreviewModal",
+    "NeighborhoodIssueRow",
     "NeighborhoodResolutionModal",
     "PrimarySelectionModal",
     "SearchFilters",

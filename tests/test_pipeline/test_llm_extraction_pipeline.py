@@ -36,7 +36,7 @@ class _FakeLLMExtractor:
                 confidence=0.9,
                 chunk_id=chunk.chunk_id,
                 document_id=chunk.document_id,
-                source="llm"
+                source="llm",
             )
         ]
 
@@ -58,7 +58,7 @@ class _FakeLLMExtractor:
                 bidirectional=False,
                 chunk_id=getattr(chunk, "chunk_id", None),
                 document_id=getattr(chunk, "document_id", None),
-                source_extractor="llm"
+                source_extractor="llm",
             )
         ]
 

@@ -112,18 +112,20 @@ class NeighborhoodResolutionModal(ModalScreen[List[NeighborhoodIssue]]):
             yield Static(
                 f"Found {len(self.all_issues)} pending relationships blocked by peer entities.\n"
                 "Select actions to resolve them:",
-                id="summary"
+                id="summary",
             )
 
             with VerticalScroll(id="issue-list"):
                 for idx, sig in enumerate(self.display_order):
                     issues = self.grouped_issues[sig]
-                    representative = issues[0] # Use first one for display logic
+                    representative = issues[0]  # Use first one for display logic
                     count = len(issues)
 
                     action_text = ""
                     if representative.issue_type == "promotable":
-                        action_text = f"Promote relationship to approved '{representative.peer_name}'"
+                        action_text = (
+                            f"Promote relationship to approved '{representative.peer_name}'"
+                        )
                     elif representative.issue_type == "resolvable":
                         action_text = f"Approve pending candidate '{representative.peer_name}'"
                     elif representative.issue_type == "missing":

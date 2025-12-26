@@ -322,7 +322,7 @@ class QueryParser:
                 if exp.lower() not in keywords:
                     keywords.append(exp.lower())
                 all_expansions.append(exp)
-        
+
         # If we have expansions, create an enriched version of normalized text for vector search
         if all_expansions:
             enriched_text = normalized + " " + " ".join(all_expansions)

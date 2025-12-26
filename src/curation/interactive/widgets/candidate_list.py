@@ -1,4 +1,4 @@
-"""Scrollable list widget for displaying entity candidates."""
+"""Scrollable list widget for displaying entity and relationship candidates."""
 
 from typing import List, Optional
 
@@ -10,7 +10,8 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
 
-from src.storage.schemas import EntityCandidate
+from src.curation.interactive.widgets.relationship_row import RelationshipRow
+from src.storage.schemas import EntityCandidate, RelationshipCandidate
 
 
 class CandidateRow(Static):
@@ -111,7 +112,7 @@ class CandidateRow(Static):
 
 
 class CandidateList(Widget):
-    """Scrollable list of entity candidates with keyboard navigation."""
+    """Scrollable list of entity or relationship candidates with keyboard navigation."""
 
     # Make widget focusable for keyboard input
     can_focus = True
@@ -126,15 +127,19 @@ class CandidateList(Widget):
     ]
 
     # Reactive attributes
-    candidates: reactive[List[EntityCandidate]] = reactive([], recompose=True)
+    candidates: reactive[List[EntityCandidate | RelationshipCandidate]] = reactive(
+        [], recompose=True
+    )
     current_index: reactive[int] = reactive(0)
     selected_ids: set[str] = set()  # IDs of candidates selected for batch operations
 
-    def __init__(self, candidates: Optional[List[EntityCandidate]] = None) -> None:
+    def __init__(
+        self, candidates: Optional[List[EntityCandidate | RelationshipCandidate]] = None
+    ) -> None:
         """Initialize candidate list.
 
         Args:
-            candidates: Optional initial list of candidates
+            candidates: Optional initial list of entity or relationship candidates
         """
         super().__init__()
         if candidates:
@@ -147,12 +152,23 @@ class CandidateList(Widget):
                 yield Static("No candidates to display", classes="empty-state")
             else:
                 for idx, candidate in enumerate(self.candidates):
-                    row = CandidateRow(
-                        candidate=candidate,
-                        index=idx,
-                        is_selected=(idx == self.current_index),
-                        is_checked=(candidate.id in self.selected_ids),
-                    )
+                    # Determine which row type to use based on candidate type
+                    if isinstance(candidate, EntityCandidate):
+                        row = CandidateRow(
+                            candidate=candidate,
+                            index=idx,
+                            is_selected=(idx == self.current_index),
+                            is_checked=(candidate.id in self.selected_ids),
+                        )
+                    else:  # RelationshipCandidate
+                        row = RelationshipRow(
+                            candidate=candidate,
+                            index=idx,
+                            is_selected=(idx == self.current_index),
+                            is_checked=(
+                                candidate.id in self.selected_ids if candidate.id else False
+                            ),
+                        )
                     yield row
 
     def watch_current_index(self, old_index: int, new_index: int) -> None:
@@ -162,8 +178,13 @@ class CandidateList(Widget):
             old_index: Previous selected index
             new_index: New selected index
         """
-        # Query for row widgets dynamically (avoids stale list issues)
-        rows = list(self.query(CandidateRow))
+        # Query for both types of row widgets dynamically (avoids stale list issues)
+        candidate_rows = list(self.query(CandidateRow))
+        relationship_rows = list(self.query(RelationshipRow))
+        rows = candidate_rows + relationship_rows
+
+        # Sort by index to maintain correct order
+        rows.sort(key=lambda r: r.index)
 
         # Update row selection states
         if 0 <= old_index < len(rows):
@@ -182,7 +203,11 @@ class CandidateList(Widget):
             # No app context (e.g., during testing)
             pass
 
-    def watch_candidates(self, old: List[EntityCandidate], new: List[EntityCandidate]) -> None:
+    def watch_candidates(
+        self,
+        old: List[EntityCandidate | RelationshipCandidate],
+        new: List[EntityCandidate | RelationshipCandidate],
+    ) -> None:
         """React to candidates list changes by recomposing.
 
         Args:
@@ -193,7 +218,7 @@ class CandidateList(Widget):
         pass
 
     @property
-    def current_candidate(self) -> Optional[EntityCandidate]:
+    def current_candidate(self) -> Optional[EntityCandidate | RelationshipCandidate]:
         """Get the currently selected candidate."""
         if 0 <= self.current_index < len(self.candidates):
             return self.candidates[self.current_index]
@@ -227,11 +252,13 @@ class CandidateList(Widget):
         if self.candidates:
             self.current_index = len(self.candidates) - 1
 
-    def refresh_candidates(self, candidates: List[EntityCandidate]) -> None:
+    def refresh_candidates(
+        self, candidates: List[EntityCandidate | RelationshipCandidate]
+    ) -> None:
         """Refresh the candidate list with new data.
 
         Args:
-            candidates: New list of candidates to display
+            candidates: New list of entity or relationship candidates to display
         """
         self.candidates = candidates
         # Note: Don't reset current_index here - let the app manage the index position
@@ -241,8 +268,14 @@ class CandidateList(Widget):
 
         This method updates the checkbox display without recomposing the entire list.
         """
-        rows = list(self.query(CandidateRow))
-        for row in rows:
-            is_checked = row.candidate.id in self.selected_ids
+        candidate_rows = list(self.query(CandidateRow))
+        relationship_rows = list(self.query(RelationshipRow))
+        all_rows = candidate_rows + relationship_rows
+
+        for row in all_rows:
+            candidate_id = (
+                row.candidate.id if hasattr(row.candidate, "id") and row.candidate.id else None
+            )
+            is_checked = candidate_id in self.selected_ids if candidate_id else False
             if row.is_checked != is_checked:
                 row.set_checked(is_checked)

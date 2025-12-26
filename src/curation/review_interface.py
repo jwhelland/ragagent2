@@ -27,7 +27,9 @@ from src.utils.config import Config, load_config
 
 app = typer.Typer(help="Review and search entity candidates.")
 normalization_app = typer.Typer(help="Review and search normalization mappings.")
+relationship_app = typer.Typer(help="Review and curate relationship candidates.")
 app.add_typer(normalization_app, name="normalization")
+app.add_typer(relationship_app, name="relationship")
 
 console = Console(color_system=None, force_terminal=False, width=120)
 
@@ -235,11 +237,11 @@ def _handle_neighborhood_issues(
                         source_documents=issue.relationship_candidate.source_documents,
                         chunk_ids=issue.relationship_candidate.chunk_ids,
                     )
-                    console.print(f"[green]Created and approved entity '{issue.peer_name}'.[/green]")
-                    # Recursively check new neighborhood
-                    _handle_neighborhood_issues(
-                        service, store, issue.peer_name, []
+                    console.print(
+                        f"[green]Created and approved entity '{issue.peer_name}'.[/green]"
                     )
+                    # Recursively check new neighborhood
+                    _handle_neighborhood_issues(service, store, issue.peer_name, [])
                 except ValueError:
                     console.print(f"[red]Invalid entity type: {new_type_str}[/red]")
                 except Exception as e:
@@ -794,6 +796,239 @@ def normalization_stats(
             f"{entity_type}={count}" for entity_type, count in sorted(by_type.items(), reverse=True)
         )
     )
+
+
+# =====================================================================
+# Relationship Review Commands
+# =====================================================================
+
+
+@relationship_app.command("queue")
+def relationship_queue(
+    status: Optional[str] = typer.Option(None, help="Filter by status (pending/approved/rejected)"),
+    rel_type: Optional[str] = typer.Option(None, help="Filter by relationship type"),
+    min_confidence: Optional[float] = typer.Option(None, help="Minimum confidence threshold"),
+    limit: int = typer.Option(50, help="Maximum results to return"),
+    offset: int = typer.Option(0, help="Results offset for pagination"),
+    config_path: str = "config/config.yaml",
+) -> None:
+    """List relationship candidates with optional filters."""
+    config = load_config(config_path)
+    manager = Neo4jManager(config.database)
+    manager.connect()
+
+    try:
+        candidates = manager.get_relationship_candidates(
+            status=status,
+            rel_type=rel_type,
+            min_confidence=min_confidence,
+            limit=limit,
+            offset=offset,
+        )
+
+        if not candidates:
+            console.print("[yellow]No relationship candidates found matching criteria.[/yellow]")
+            return
+
+        table = Table(title=f"Relationship Candidates ({len(candidates)} results)")
+        table.add_column("ID", style="cyan", no_wrap=True)
+        table.add_column("Source", style="green")
+        table.add_column("Type", style="magenta")
+        table.add_column("Target", style="green")
+        table.add_column("Conf", justify="right")
+        table.add_column("Status", style="yellow")
+        table.add_column("Mentions", justify="right")
+
+        for cand in candidates:
+            table.add_row(
+                cand.get("id", "")[:12],
+                cand.get("source", "")[:30],
+                cand.get("type", ""),
+                cand.get("target", "")[:30],
+                f"{cand.get('confidence_score', 0):.2f}",
+                cand.get("status", ""),
+                str(cand.get("mention_count", 0)),
+            )
+
+        console.print(table)
+        console.print(
+            f"\n[dim]Showing {len(candidates)} of {limit} results (offset={offset})[/dim]"
+        )
+
+    finally:
+        manager.close()
+
+
+@relationship_app.command("show")
+def relationship_show(
+    identifier: str = typer.Argument(..., help="Relationship candidate ID or candidate_key"),
+    config_path: str = "config/config.yaml",
+) -> None:
+    """Show detailed information about a relationship candidate."""
+    config = load_config(config_path)
+    manager = Neo4jManager(config.database)
+    manager.connect()
+
+    try:
+        candidate = manager.get_relationship_candidate(identifier)
+
+        if not candidate:
+            console.print(f"[red]Relationship candidate not found: {identifier}[/red]")
+            return
+
+        console.print("\n[bold]Relationship Candidate Details[/bold]")
+        console.print(f"ID: {candidate.get('id', 'N/A')}")
+        console.print(f"Candidate Key: {candidate.get('candidate_key', 'N/A')}")
+        console.print(f"Source: [green]{candidate.get('source', 'N/A')}[/green]")
+        console.print(f"Type: [magenta]{candidate.get('type', 'N/A')}[/magenta]")
+        console.print(f"Target: [green]{candidate.get('target', 'N/A')}[/green]")
+        console.print(f"Description: {candidate.get('description', 'N/A')}")
+        console.print(f"Confidence: {candidate.get('confidence_score', 0):.2f}")
+        console.print(f"Status: [yellow]{candidate.get('status', 'N/A')}[/yellow]")
+        console.print(f"Mention Count: {candidate.get('mention_count', 0)}")
+        console.print(f"Bidirectional: {candidate.get('bidirectional', False)}")
+
+        # Show source documents
+        source_docs = candidate.get("source_documents", [])
+        if source_docs:
+            console.print(f"\nSource Documents: {', '.join(source_docs[:5])}")
+            if len(source_docs) > 5:
+                console.print(f"  ... and {len(source_docs) - 5} more")
+
+        # Show chunk IDs
+        chunk_ids = candidate.get("chunk_ids", [])
+        if chunk_ids:
+            console.print(f"\nChunk IDs: {len(chunk_ids)} chunks")
+
+    finally:
+        manager.close()
+
+
+@relationship_app.command("approve")
+def relationship_approve(
+    identifier: str = typer.Argument(..., help="Relationship candidate ID or candidate_key"),
+    config_path: str = "config/config.yaml",
+) -> None:
+    """Approve a relationship candidate (marks it for promotion)."""
+    config = load_config(config_path)
+    manager = Neo4jManager(config.database)
+    manager.connect()
+
+    try:
+        candidate = manager.get_relationship_candidate(identifier)
+
+        if not candidate:
+            console.print(f"[red]Relationship candidate not found: {identifier}[/red]")
+            return
+
+        # Update status to approved
+        manager.update_relationship_candidate_status(candidate.get("id"), CandidateStatus.APPROVED)
+
+        console.print(
+            f"[green]✓[/green] Approved relationship: "
+            f"{candidate.get('source')} {candidate.get('type')} {candidate.get('target')}"
+        )
+
+    finally:
+        manager.close()
+
+
+@relationship_app.command("reject")
+def relationship_reject(
+    identifier: str = typer.Argument(..., help="Relationship candidate ID or candidate_key"),
+    reason: Optional[str] = typer.Option(None, help="Rejection reason"),
+    config_path: str = "config/config.yaml",
+) -> None:
+    """Reject a relationship candidate."""
+    config = load_config(config_path)
+    manager = Neo4jManager(config.database)
+    manager.connect()
+
+    try:
+        candidate = manager.get_relationship_candidate(identifier)
+
+        if not candidate:
+            console.print(f"[red]Relationship candidate not found: {identifier}[/red]")
+            return
+
+        # Update status to rejected
+        manager.update_relationship_candidate_status(candidate.get("id"), CandidateStatus.REJECTED)
+
+        console.print(
+            f"[red]✗[/red] Rejected relationship: "
+            f"{candidate.get('source')} {candidate.get('type')} {candidate.get('target')}"
+        )
+        if reason:
+            console.print(f"  Reason: {reason}")
+
+    finally:
+        manager.close()
+
+
+@relationship_app.command("batch-approve")
+def relationship_batch_approve(
+    min_confidence: float = typer.Option(0.8, help="Minimum confidence threshold"),
+    rel_type: Optional[str] = typer.Option(None, help="Filter by relationship type"),
+    dry_run: bool = typer.Option(True, help="Preview changes without applying"),
+    config_path: str = "config/config.yaml",
+) -> None:
+    """Batch approve high-confidence relationship candidates."""
+    config = load_config(config_path)
+    manager = Neo4jManager(config.database)
+    manager.connect()
+
+    try:
+        # Get pending candidates above threshold
+        candidates = manager.get_relationship_candidates(
+            status="pending",
+            rel_type=rel_type,
+            min_confidence=min_confidence,
+            limit=1000,
+            offset=0,
+        )
+
+        if not candidates:
+            console.print(
+                "[yellow]No pending relationship candidates found above threshold.[/yellow]"
+            )
+            return
+
+        console.print(f"Found {len(candidates)} candidates above confidence {min_confidence}")
+
+        if dry_run:
+            console.print("\n[yellow]DRY RUN - No changes will be made[/yellow]")
+            table = Table(title="Candidates to Approve")
+            table.add_column("Source", style="green")
+            table.add_column("Type", style="magenta")
+            table.add_column("Target", style="green")
+            table.add_column("Conf", justify="right")
+
+            for cand in candidates[:20]:  # Show first 20
+                table.add_row(
+                    cand.get("source", "")[:30],
+                    cand.get("type", ""),
+                    cand.get("target", "")[:30],
+                    f"{cand.get('confidence_score', 0):.2f}",
+                )
+
+            console.print(table)
+            if len(candidates) > 20:
+                console.print(f"\n[dim]... and {len(candidates) - 20} more[/dim]")
+
+            console.print("\n[yellow]Re-run with --no-dry-run to apply changes[/yellow]")
+        else:
+            # Apply approvals
+            approved_count = 0
+            for cand in candidates:
+                manager.update_relationship_candidate_status(
+                    cand.get("id"), CandidateStatus.APPROVED
+                )
+                approved_count += 1
+
+            console.print(f"[green]✓[/green] Approved {approved_count} relationship candidates")
+
+    finally:
+        manager.close()
 
 
 def run() -> None:

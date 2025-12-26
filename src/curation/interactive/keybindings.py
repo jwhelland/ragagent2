@@ -14,6 +14,7 @@ NAVIGATION_BINDINGS = [
 
 # Action bindings (handled by ReviewApp)
 ACTION_BINDINGS = [
+    Binding("t", "toggle_review_mode", "Toggle Mode", show=True, priority=False),
     Binding("a", "approve_current", "Approve", show=True, priority=False),
     Binding("r", "reject_current", "Reject", show=True, priority=False),
     Binding("e", "edit_current", "Edit", show=True, priority=False),

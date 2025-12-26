@@ -1,4 +1,4 @@
-"""Detail panel widget for displaying full entity candidate information."""
+"""Detail panel widget for displaying full relationship candidate information."""
 
 from typing import Optional
 
@@ -9,7 +9,7 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
 
-from src.storage.schemas import EntityCandidate
+from src.storage.schemas import RelationshipCandidate
 
 
 class DetailSection(Static):
@@ -35,17 +35,17 @@ class DetailSection(Static):
         self.update(text)
 
 
-class DetailPanel(Widget):
-    """Panel displaying detailed information about the selected candidate."""
+class RelationshipDetailPanel(Widget):
+    """Panel displaying detailed information about the selected relationship candidate."""
 
     # Reactive attribute for the current candidate
-    candidate: reactive[Optional[EntityCandidate]] = reactive(None, recompose=True)
+    candidate: reactive[Optional[RelationshipCandidate]] = reactive(None, recompose=True)
 
-    def __init__(self, candidate: Optional[EntityCandidate] = None) -> None:
-        """Initialize detail panel.
+    def __init__(self, candidate: Optional[RelationshipCandidate] = None) -> None:
+        """Initialize relationship detail panel.
 
         Args:
-            candidate: Optional initial candidate to display
+            candidate: Optional initial relationship candidate to display
         """
         super().__init__()
         if candidate:
@@ -54,18 +54,14 @@ class DetailPanel(Widget):
     def compose(self) -> ComposeResult:
         """Create child widgets for the detail panel."""
         if not self.candidate:
-            yield Static("No candidate selected", classes="empty-detail")
+            yield Static("No relationship candidate selected", classes="empty-detail")
         else:
             with VerticalScroll():
-                # Header with candidate name
+                # Header with relationship source → type → target
                 yield self._render_header()
 
                 # Core information
                 yield self._render_core_info()
-
-                # Aliases
-                if self.candidate.aliases:
-                    yield self._render_aliases()
 
                 # Description
                 if self.candidate.description:
@@ -83,15 +79,23 @@ class DetailPanel(Widget):
                 if self.candidate.provenance_events:
                     yield self._render_provenance()
 
-                # Conflicting types (if any)
-                if self.candidate.conflicting_types:
-                    yield self._render_conflicting_types()
-
     def _render_header(self) -> Static:
-        """Render the header with candidate name."""
+        """Render the header with relationship triple."""
         text = Text()
-        text.append(f"\n{self.candidate.canonical_name}\n", style="bold white on blue")
-        text.append(f"ID: {self.candidate.id or self.candidate.candidate_key}\n", style="dim")
+        text.append("\n", style="")
+        # Source entity
+        text.append(f"{self.candidate.source}", style="bold yellow")
+        text.append(" → ", style="dim")
+        # Relationship type
+        text.append(f"{self.candidate.type}", style="bold cyan")
+        text.append(" → ", style="dim")
+        # Target entity
+        text.append(f"{self.candidate.target}\n", style="bold yellow")
+
+        text.append(f"Key: {self.candidate.candidate_key}\n", style="dim")
+        if self.candidate.id:
+            text.append(f"ID: {self.candidate.id}\n", style="dim")
+
         return Static(text, classes="detail-header")
 
     def _render_core_info(self) -> DetailSection:
@@ -106,8 +110,8 @@ class DetailPanel(Widget):
 
         text = Text()
 
-        text.append("Type: ", style="bold")
-        text.append(f"{self.candidate.candidate_type.value}\n", style="cyan")
+        text.append("Relationship Type: ", style="bold")
+        text.append(f"{self.candidate.type}\n", style="cyan")
 
         text.append("Status: ", style="bold")
         status_style = {
@@ -132,15 +136,6 @@ class DetailPanel(Widget):
             text.append(f"{self.candidate.last_seen.strftime('%Y-%m-%d %H:%M')}\n", style="dim")
 
         return DetailSection("Core Information", text.plain)
-
-    def _render_aliases(self) -> DetailSection:
-        """Render aliases section."""
-        aliases_text = "\n".join(f"  • {alias}" for alias in self.candidate.aliases)
-        return DetailSection(
-            f"Aliases ({len(self.candidate.aliases)})",
-            aliases_text,
-            classes="detail-aliases",
-        )
 
     def _render_description(self) -> DetailSection:
         """Render description section."""
@@ -199,46 +194,14 @@ class DetailPanel(Widget):
 
             if len(self.candidate.provenance_events) > 5:
                 provenance_text += (
-                    f"  ... and {len(self.candidate.provenance_events) - 5} more events\n"
+                    f"  ... and {len(self.candidate.provenance_events) - 5} more events"
                 )
 
-        except Exception as e:
-            provenance_text = f"  Error parsing provenance: {e}"
+        except (json.JSONDecodeError, TypeError) as e:
+            provenance_text = f"Error parsing provenance: {e}"
 
         return DetailSection(
             f"Provenance ({len(self.candidate.provenance_events)} events)",
             provenance_text,
             classes="detail-provenance",
         )
-
-    def _render_conflicting_types(self) -> DetailSection:
-        """Render conflicting types section (if any)."""
-        # Only called for EntityCandidate
-        types_text = "\n".join(
-            f"  • {conflict_type}" for conflict_type in self.candidate.conflicting_types
-        )
-        return DetailSection(
-            f"⚠️  Conflicting Types ({len(self.candidate.conflicting_types)})",
-            types_text,
-            classes="detail-conflicts",
-        )
-
-    def watch_candidate(
-        self, old: Optional[EntityCandidate], new: Optional[EntityCandidate]
-    ) -> None:
-        """React to candidate changes by recomposing.
-
-        Args:
-            old: Previous candidate
-            new: New candidate
-        """
-        # Recomposition happens automatically due to recompose=True
-        pass
-
-    def update_candidate(self, candidate: Optional[EntityCandidate]) -> None:
-        """Update the displayed candidate.
-
-        Args:
-            candidate: New candidate to display
-        """
-        self.candidate = candidate

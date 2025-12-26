@@ -36,6 +36,7 @@ def mock_neo4j() -> Mock:
     neo4j.get_relationships.return_value = []
     neo4j.execute_cypher.return_value = []
     neo4j.get_statistics.return_value = {}
+    neo4j.get_existing_relationship_types.return_value = [rt.value for rt in RelationshipType]
     return neo4j
 
 

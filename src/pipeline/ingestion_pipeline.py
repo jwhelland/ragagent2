@@ -22,10 +22,10 @@ from typing import TYPE_CHECKING, Any, DefaultDict, Dict, List, Optional
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
-from src.extraction import EntityMerger, LLMExtractor, SpacyExtractor
-from src.extraction.cooccurrence_extractor import CooccurrenceRelationshipExtractor
+from src.extraction import EntityMerger, ExtractedEntity, LLMExtractor, SpacyExtractor
 from src.extraction.dependency_extractor import DependencyRelationshipExtractor
 from src.extraction.pattern_extractor import PatternRelationshipExtractor
+from src.extraction.relationship_validator import RelationshipValidator
 from src.ingestion.chunker import HierarchicalChunker
 from src.ingestion.pdf_parser import ParsedDocument
 from src.ingestion.text_cleaner import TextCleaner
@@ -59,6 +59,7 @@ class IngestionResult(BaseModel):
     success: bool
     chunks_created: int = 0
     entities_created: int = 0
+    relationships_filtered: int = 0
     processing_time: float = 0.0
     error: Optional[str] = None
 
@@ -156,8 +157,8 @@ class IngestionPipeline:
         self.spacy_extractor: SpacyExtractor | None = None
         self.pattern_extractor: PatternRelationshipExtractor | None = None
         self.dependency_extractor: DependencyRelationshipExtractor | None = None
-        self.cooccurrence_extractor: CooccurrenceRelationshipExtractor | None = None
         self.llm_extractor: LLMExtractor | None = None
+        self.relationship_validator: RelationshipValidator | None = None
         self.entity_merger: EntityMerger | None = None
         self.string_normalizer: StringNormalizer | None = None
         self.acronym_resolver: AcronymResolver | None = None
@@ -230,6 +231,14 @@ class IngestionPipeline:
                 normalizer=string_normalizer,
             )
 
+        if self.relationship_validator is None:
+            string_normalizer = self.string_normalizer
+            assert string_normalizer is not None
+            self.relationship_validator = RelationshipValidator(
+                config=self.config.extraction.relationship_validation,
+                normalizer=string_normalizer,
+            )
+
         if self.spacy_extractor is None:
             try:
                 self.spacy_extractor = SpacyExtractor(self.config.extraction.spacy)
@@ -243,10 +252,7 @@ class IngestionPipeline:
             try:
                 self.pattern_extractor = PatternRelationshipExtractor()
             except Exception as exc:
-                logger.warning(
-                    "Pattern extractor initialization failed",
-                    error=str(exc)
-                )
+                logger.warning("Pattern extractor initialization failed", error=str(exc))
 
         if self.dependency_extractor is None:
             try:
@@ -254,13 +260,7 @@ class IngestionPipeline:
                 nlp = self.spacy_extractor.nlp if self.spacy_extractor else None
                 self.dependency_extractor = DependencyRelationshipExtractor(nlp=nlp)
             except Exception as exc:
-                logger.warning(
-                    "Dependency extractor initialization failed",
-                    error=str(exc)
-                )
-
-        if self.cooccurrence_extractor is None:
-            self.cooccurrence_extractor = CooccurrenceRelationshipExtractor()
+                logger.warning("Dependency extractor initialization failed", error=str(exc))
 
         if self.llm_extractor is None and self.config.extraction.enable_llm:
             try:
@@ -446,7 +446,9 @@ class IngestionPipeline:
             if can_parallelize:
                 with ThreadPoolExecutor(max_workers=2) as executor:
                     spacy_future = executor.submit(self._extract_spacy_entities, chunks, progress)
-                    llm_future = executor.submit(self._extract_llm_entities, llm_extraction_chunks, llm_progress)
+                    llm_future = executor.submit(
+                        self._extract_llm_entities, llm_extraction_chunks, llm_progress
+                    )
                     spacy_entities_created = spacy_future.result()
                     llm_entities_created = llm_future.result()
             else:
@@ -459,11 +461,15 @@ class IngestionPipeline:
                         )
                     else:
                         logger.debug("Step 4b: Extracting entities with LLM")
-                        llm_entities_created = self._extract_llm_entities(llm_extraction_chunks, llm_progress)
+                        llm_entities_created = self._extract_llm_entities(
+                            llm_extraction_chunks, llm_progress
+                        )
 
             if self.config.extraction.enable_llm and self.llm_extractor:
                 logger.debug("Step 4c: Extracting relationships with LLM")
-                llm_relationships_created = self._extract_llm_relationships(llm_extraction_chunks, llm_progress)
+                llm_relationships_created = self._extract_llm_relationships(
+                    llm_extraction_chunks, llm_progress
+                )
 
                 # Step 4c.1: Propagate entities to child chunks
                 # This ensures that L4 paragraphs inherit entities found in their L2/L3 parent sections
@@ -471,7 +477,9 @@ class IngestionPipeline:
 
             # Step 4c.2: Extract rule-based relationships (Pattern + Dependency)
             logger.debug("Step 4c.2: Extracting rule-based relationships")
-            rule_based_relationships_created = self._extract_rule_based_relationships(chunks, progress)
+            rule_based_relationships_created = self._extract_rule_based_relationships(
+                chunks, progress
+            )
 
             # Step 4d: Merge entities across extractors
             logger.debug("Step 4d: Merging extracted entities")
@@ -531,7 +539,8 @@ class IngestionPipeline:
                 self.stats.get("llm_relationships_extracted", 0) + llm_relationships_created
             )
             self.stats["rule_based_relationships_extracted"] = (
-                self.stats.get("rule_based_relationships_extracted", 0) + rule_based_relationships_created
+                self.stats.get("rule_based_relationships_extracted", 0)
+                + rule_based_relationships_created
             )
             self.stats["merged_entities_created"] = (
                 self.stats.get("merged_entities_created", 0) + merged_entities_created
@@ -760,9 +769,7 @@ class IngestionPipeline:
 
         return suggestion_count
 
-    def _perform_auto_merges(
-        self, chunks: List[Any], suggestions: List[MergeSuggestion]
-    ) -> int:
+    def _perform_auto_merges(self, chunks: List[Any], suggestions: List[MergeSuggestion]) -> int:
         """Execute automatic merges on the chunks in-place."""
         if not suggestions:
             return 0
@@ -848,7 +855,9 @@ class IngestionPipeline:
                     continue
 
                 # Check if this candidate is part of a merge group (either survivor or victim)
-                is_survivor = key in merged_data_cache or (key in involved_keys and key not in replacement_map)
+                is_survivor = key in merged_data_cache or (
+                    key in involved_keys and key not in replacement_map
+                )
                 is_victim = key in replacement_map
 
                 if not (is_survivor or is_victim):
@@ -860,11 +869,11 @@ class IngestionPipeline:
                 if survivor_key not in merged_data_cache:
                     base_stats = candidate_stats.get(survivor_key)
                     if not base_stats:
-                        continue # Should not happen
+                        continue  # Should not happen
 
                     merged_data_cache[survivor_key] = {
                         "canonical_name": base_stats["canonical_name"],
-                        "canonical_normalized": "", # Will re-normalize if needed
+                        "canonical_normalized": "",  # Will re-normalize if needed
                         "type": base_stats["type"],
                         "candidate_key": survivor_key,
                         "confidence": 0.0,
@@ -878,7 +887,9 @@ class IngestionPipeline:
                 target = merged_data_cache[survivor_key]
 
                 # Merge logic
-                target["confidence"] = max(float(target["confidence"]), float(cand.get("confidence", 0.0)))
+                target["confidence"] = max(
+                    float(target["confidence"]), float(cand.get("confidence", 0.0))
+                )
                 target["mention_count"] += int(cand.get("mention_count", 1))
 
                 # Aliases
@@ -886,13 +897,16 @@ class IngestionPipeline:
                     if alias:
                         target["aliases"].add(alias)
                 # Add own canonical name as alias if different from survivor
-                if cand.get("canonical_name") and cand.get("canonical_name") != target["canonical_name"]:
-                     target["aliases"].add(cand.get("canonical_name"))
+                if (
+                    cand.get("canonical_name")
+                    and cand.get("canonical_name") != target["canonical_name"]
+                ):
+                    target["aliases"].add(cand.get("canonical_name"))
 
                 # Description (keep longest)
                 desc = str(cand.get("description", ""))
                 if len(desc) > len(str(target["description"])):
-                     target["description"] = desc
+                    target["description"] = desc
 
                 # Conflicting types
                 for ct in cand.get("conflicting_types") or []:
@@ -1393,44 +1407,55 @@ class IngestionPipeline:
     ) -> int:
         """Extract relationships using pattern and dependency extractors."""
         total = 0
-        if self.pattern_extractor:
-            for chunk in chunks:
-                metadata = getattr(chunk, "metadata", {}) or {}
+        total_filtered = 0
+
+        for chunk in chunks:
+            metadata = getattr(chunk, "metadata", {}) or {}
+            all_rels = []
+
+            # Extract from pattern extractor
+            if self.pattern_extractor:
                 rels = self.pattern_extractor.extract_relationships(chunk)
                 if rels:
-                    metadata.setdefault("rule_based_relationships", []).extend([
-                        r.model_dump() for r in rels
-                    ])
-                    total += len(rels)
-                chunk.metadata = metadata
+                    all_rels.extend([r.model_dump() for r in rels])
 
-        if self.dependency_extractor:
-            for chunk in chunks:
-                metadata = getattr(chunk, "metadata", {}) or {}
+            # Extract from dependency extractor
+            if self.dependency_extractor:
                 rels = self.dependency_extractor.extract_relationships(chunk)
                 if rels:
-                    metadata.setdefault("rule_based_relationships", []).extend([
-                        r.model_dump() for r in rels
-                    ])
-                    total += len(rels)
-                chunk.metadata = metadata
+                    all_rels.extend([r.model_dump() for r in rels])
 
-        if self.cooccurrence_extractor:
-            for chunk in chunks:
-                metadata = getattr(chunk, "metadata", {}) or {}
+            if not all_rels:
+                continue
+
+            # Validate relationships against known entities
+            if self.relationship_validator:
                 known_entities = []
                 known_entities.extend(metadata.get("llm_entities", []))
                 known_entities.extend(metadata.get("spacy_entities", []))
 
-                rels = self.cooccurrence_extractor.extract_relationships(
-                    chunk, known_entities=known_entities
+                valid_rels, rejected_rels = self.relationship_validator.filter_relationships(
+                    all_rels, known_entities
                 )
-                if rels:
-                    metadata.setdefault("rule_based_relationships", []).extend([
-                        r.model_dump() for r in rels
-                    ])
-                    total += len(rels)
-                chunk.metadata = metadata
+
+                total_filtered += len(rejected_rels)
+
+                if valid_rels:
+                    metadata.setdefault("rule_based_relationships", []).extend(valid_rels)
+                    total += len(valid_rels)
+            else:
+                # No validation - store all relationships
+                metadata.setdefault("rule_based_relationships", []).extend(all_rels)
+                total += len(all_rels)
+
+            chunk.metadata = metadata
+
+        if total_filtered > 0:
+            logger.info(f"Filtered {total_filtered} rule-based relationships (kept {total})")
+
+        self.stats["relationships_filtered"] = (
+            self.stats.get("relationships_filtered", 0) + total_filtered
+        )
 
         return total
 
@@ -1442,6 +1467,8 @@ class IngestionPipeline:
             return 0
 
         total = 0
+        total_filtered = 0
+
         for chunk in chunks:
             metadata = getattr(chunk, "metadata", {}) or {}
             known_entities = []
@@ -1467,28 +1494,102 @@ class IngestionPipeline:
                 relationships = []
 
             if relationships:
-                total += len(relationships)
-                metadata.setdefault("llm_relationships", [])
+                # Convert to dicts for validation and handle auto-discovery
+                rel_dicts = []
+                new_entities_discovered = []
 
                 for rel in relationships:
-                    metadata["llm_relationships"].append(
-                        {
-                            "source": rel.source,
-                            "type": rel.type,
-                            "target": rel.target,
-                            "description": rel.description,
-                            "confidence": rel.confidence,
-                            "bidirectional": rel.bidirectional,
-                            "chunk_id": rel.chunk_id or getattr(chunk, "chunk_id", None),
-                            "document_id": rel.document_id or getattr(chunk, "document_id", None),
-                            "source_extractor": rel.source_extractor,
-                        }
+                    rel_dict = {
+                        "source": rel.source,
+                        "source_type": rel.source_type,
+                        "type": rel.type,
+                        "target": rel.target,
+                        "target_type": rel.target_type,
+                        "description": rel.description,
+                        "confidence": rel.confidence,
+                        "bidirectional": rel.bidirectional,
+                        "chunk_id": rel.chunk_id or getattr(chunk, "chunk_id", None),
+                        "document_id": rel.document_id or getattr(chunk, "document_id", None),
+                        "source_extractor": rel.source_extractor,
+                    }
+                    rel_dicts.append(rel_dict)
+
+                    # Auto-discovery logic: Check if source or target are unknown
+                    for side_name, side_type in [
+                        (rel.source, rel.source_type),
+                        (rel.target, rel.target_type),
+                    ]:
+                        if not side_name or not side_type:
+                            continue
+
+                        # Check if this entity is already known (fuzzy check)
+                        is_known = False
+                        side_norm = self.string_normalizer.normalize(side_name).normalized
+
+                        # Check against existing entities in this chunk
+                        for ent in known_entities:
+                            ent_name = str(ent.get("name") or ent.get("canonical_name") or "")
+                            ent_norm = self.string_normalizer.normalize(ent_name).normalized
+                            if side_norm == ent_norm:
+                                is_known = True
+                                break
+
+                        if not is_known:
+                            # Synthesize a new entity
+                            new_ent = {
+                                "name": side_name,
+                                "type": side_type,
+                                "description": f"Discovered via relationship to {rel.target if side_name == rel.source else rel.source}",
+                                "confidence": rel.confidence
+                                * 0.8,  # Slightly lower confidence for discovered entities
+                                "source": "llm_discovery",
+                                "chunk_id": getattr(chunk, "chunk_id", None),
+                                "document_id": getattr(chunk, "document_id", None),
+                            }
+                            new_entities_discovered.append(new_ent)
+                            known_entities.append(new_ent)  # Add to validation context immediately
+
+                            # Add to chunk metadata so it gets merged later
+                            metadata.setdefault("llm_entities", []).append(new_ent)
+
+                            # Also update the pipeline cache for propagation
+                            chunk_id = getattr(chunk, "chunk_id", None)
+                            if chunk_id not in self._llm_entities_by_chunk:
+                                self._llm_entities_by_chunk[chunk_id] = []
+
+                            self._llm_entities_by_chunk[chunk_id].append(ExtractedEntity(**new_ent))
+
+                if new_entities_discovered:
+                    logger.info(
+                        f"Discovered {len(new_entities_discovered)} new entities via relationships in chunk {getattr(chunk, 'chunk_id', 'unknown')}"
                     )
+
+                # Validate relationships
+                if self.relationship_validator:
+                    valid_rels, rejected_rels = self.relationship_validator.filter_relationships(
+                        rel_dicts, known_entities
+                    )
+                    total_filtered += len(rejected_rels)
+
+                    if valid_rels:
+                        metadata.setdefault("llm_relationships", []).extend(valid_rels)
+                        total += len(valid_rels)
+                else:
+                    # No validation - store all relationships
+                    metadata.setdefault("llm_relationships", []).extend(rel_dicts)
+                    total += len(rel_dicts)
 
                 if hasattr(chunk, "metadata"):
                     chunk.metadata = metadata
             if progress:
                 progress.update("llm_relationships")
+
+        if total_filtered > 0:
+            logger.info(f"Filtered {total_filtered} LLM relationships (kept {total})")
+
+        self.stats["relationships_filtered"] = (
+            self.stats.get("relationships_filtered", 0) + total_filtered
+        )
 
         if progress and not chunks:
             progress.update("llm_relationships")
@@ -1562,17 +1663,19 @@ class IngestionPipeline:
                         self._llm_entities_by_chunk[child_id].append(propagated_entity)
 
                         # Add to chunk metadata
-                        child_metadata["llm_entities"].append({
-                            "name": ent.name,
-                            "type": ent.type,
-                            "description": ent.description,
-                            "aliases": ent.aliases,
-                            "confidence": ent.confidence,
-                            "source": ent.source,
-                            "chunk_id": child_id,
-                            "document_id": ent.document_id,
-                            "propagated_from": parent_id
-                        })
+                        child_metadata["llm_entities"].append(
+                            {
+                                "name": ent.name,
+                                "type": ent.type,
+                                "description": ent.description,
+                                "aliases": ent.aliases,
+                                "confidence": ent.confidence,
+                                "source": ent.source,
+                                "chunk_id": child_id,
+                                "document_id": ent.document_id,
+                                "propagated_from": parent_id,
+                            }
+                        )
                         propagated_count += 1
 
                 child.metadata = child_metadata

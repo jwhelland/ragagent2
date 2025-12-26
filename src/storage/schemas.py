@@ -25,6 +25,7 @@ class EntityType(str, Enum):
     TABLE = "TABLE"
     FIGURE = "FIGURE"
     ORGANIZATION = "ORGANIZATION"
+    PERSON = "PERSON"
 
 
 class EntityStatus(str, Enum):
@@ -163,7 +164,8 @@ class Entity(BaseModel):
         """Validate and normalize canonical name."""
         if not v or not v.strip():
             raise ValueError("Canonical name cannot be empty")
-        return v.strip().lower().replace(" ", "_")
+        # Collapse whitespace but preserve casing and spaces
+        return " ".join(v.strip().split())
 
     def to_neo4j_dict(self) -> Dict[str, Any]:
         """Convert entity to Neo4j-compatible dictionary.
@@ -371,7 +373,6 @@ class RelationshipType(str, Enum):
     SIMILAR_TO = "SIMILAR_TO"
     CAUSED_BY = "CAUSED_BY"
     MITIGATED_BY = "MITIGATED_BY"
-    RELATED_TO = "RELATED_TO"
 
     # Table/Figure relationships
     REFERENCES_TABLE = "REFERENCES_TABLE"

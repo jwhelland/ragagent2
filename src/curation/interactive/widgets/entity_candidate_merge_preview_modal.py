@@ -1,6 +1,6 @@
 """Modal screen for previewing merge of a candidate into an existing entity."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from textual import on
 from textual.app import ComposeResult
@@ -118,7 +118,9 @@ class EntityCandidateMergePreviewModal(ModalScreen[bool]):
                 yield Static(entity_text, classes="entity-marker")
 
                 # Candidate section
-                yield Static("\nCandidate to merge (will be marked rejected):", classes="section-title")
+                yield Static(
+                    "\nCandidate to merge (will be marked rejected):", classes="section-title"
+                )
                 candidate_text = (
                     f"◄ {self.candidate.canonical_name} "
                     f"({self.candidate.candidate_type.value}) - "
@@ -134,7 +136,7 @@ class EntityCandidateMergePreviewModal(ModalScreen[bool]):
                     existing_aliases = set(self.entity_data.get("aliases", []))
                     new_aliases = set(self.candidate.aliases) | {self.candidate.canonical_name}
                     added_aliases = new_aliases - existing_aliases
-                    
+
                     yield Static("New Aliases to be added:", classes="preview-field")
                     if added_aliases:
                         for alias in sorted(added_aliases):
@@ -154,7 +156,9 @@ class EntityCandidateMergePreviewModal(ModalScreen[bool]):
                     new_docs = set(self.candidate.source_documents)
                     total_docs = len(existing_docs | new_docs)
                     added_docs = len(new_docs - existing_docs)
-                    yield Static(f"Total: {total_docs} (+{added_docs} new)", classes="preview-value")
+                    yield Static(
+                        f"Total: {total_docs} (+{added_docs} new)", classes="preview-value"
+                    )
 
             # Buttons
             with Horizontal(id="button-container"):

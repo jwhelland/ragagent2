@@ -19,7 +19,7 @@ class PatternRelationshipExtractor:
 
         logger.info(
             f"Initialized PatternRelationshipExtractor with {len(self.patterns)} pattern groups",
-            path=str(self.patterns_path)
+            path=str(self.patterns_path),
         )
 
     def extract_relationships(
@@ -36,13 +36,24 @@ class PatternRelationshipExtractor:
         if not text:
             return []
 
-        chunk_id = getattr(chunk, "chunk_id", None) or getattr(chunk, "id", None) or (chunk.get("chunk_id") if isinstance(chunk, dict) else None)
-        document_id = getattr(chunk, "document_id", None) or (chunk.get("document_id") if isinstance(chunk, dict) else None)
+        chunk_id = (
+            getattr(chunk, "chunk_id", None)
+            or getattr(chunk, "id", None)
+            or (chunk.get("chunk_id") if isinstance(chunk, dict) else None)
+        )
+        document_id = getattr(chunk, "document_id", None) or (
+            chunk.get("document_id") if isinstance(chunk, dict) else None
+        )
 
         relationships: List[ExtractedRelationship] = []
 
         for group in self.patterns:
-            rel_type = group.get("relationship_type", "RELATED_TO")
+            rel_type = group.get("relationship_type")
+            if not rel_type:
+                logger.warning(
+                    f"Skipping pattern without relationship_type: {group.get('patterns', [])}"
+                )
+                continue
             regex_list = group.get("patterns", [])
 
             for pattern_str in regex_list:
@@ -65,12 +76,12 @@ class PatternRelationshipExtractor:
                                     target=target,
                                     type=rel_type,
                                     description=f"Extracted via pattern: {pattern_str}",
-                                    confidence=0.8, # High confidence for explicit patterns
+                                    confidence=0.8,  # High confidence for explicit patterns
                                     bidirectional=False,
                                     chunk_id=chunk_id,
                                     document_id=document_id,
                                     source_extractor="regex_patterns",
-                                    raw={"match": match.group(0), "pattern": pattern_str}
+                                    raw={"match": match.group(0), "pattern": pattern_str},
                                 )
                             )
                 except re.error as e:

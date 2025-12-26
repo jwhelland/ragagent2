@@ -362,6 +362,57 @@ class Neo4jManager:
             )
             return result.single()["id"]
 
+    def get_total_entity_candidate_count(
+        self,
+        *,
+        status: Optional[str] = None,
+        candidate_types: Optional[List[EntityType]] = None,
+        min_confidence: Optional[float] = None,
+    ) -> int:
+        """Get the total count of entity candidates matching the criteria."""
+        with self.session() as session:
+            query = """
+            MATCH (c:EntityCandidate)
+            WHERE ($status IS NULL OR c.status = $status)
+            AND ($min_confidence IS NULL OR c.confidence_score >= $min_confidence)
+            AND (
+                $candidate_types IS NULL
+                OR c.candidate_type IN $candidate_types
+            )
+            RETURN count(c) as count
+            """
+            result = session.run(
+                query,
+                status=status,
+                min_confidence=min_confidence,
+                candidate_types=[t.value for t in candidate_types] if candidate_types else None,
+            )
+            return result.single()["count"]
+
+    def get_total_relationship_candidate_count(
+        self,
+        *,
+        status: Optional[str] = None,
+        rel_type: Optional[str] = None,
+        min_confidence: Optional[float] = None,
+    ) -> int:
+        """Get the total count of relationship candidates matching the criteria."""
+        with self.session() as session:
+            query = """
+            MATCH (c:RelationshipCandidate)
+            WHERE ($status IS NULL OR c.status = $status)
+            AND ($rel_type IS NULL OR c.type = $rel_type)
+            AND ($min_confidence IS NULL OR c.confidence_score >= $min_confidence)
+            RETURN count(c) as count
+            """
+            result = session.run(
+                query,
+                status=status,
+                rel_type=rel_type,
+                min_confidence=min_confidence,
+            )
+            return result.single()["count"]
+
     def get_entity_candidates(
         self,
         *,
@@ -564,9 +615,9 @@ class Neo4jManager:
 
             WITH rc,
                  CASE
-                    WHEN any(k IN $keys WHERE rc.candidate_key STARTS WITH (k + ':')) THEN 
+                    WHEN any(k IN $keys WHERE rc.candidate_key STARTS WITH (k + ':')) THEN
                         split(rc.candidate_key, ':')[-1]
-                    ELSE 
+                    ELSE
                         split(rc.candidate_key, ':')[0]
                  END as peer_key,
                  CASE
@@ -598,9 +649,7 @@ class Neo4jManager:
             """
             entity_types = [et.value for et in EntityType]
 
-            result = session.run(
-                query, keys=keys, entity_types=entity_types, limit=limit
-            )
+            result = session.run(query, keys=keys, entity_types=entity_types, limit=limit)
 
             rows = []
             for record in result:
@@ -746,6 +795,22 @@ class Neo4jManager:
                 offset=offset,
             )
             return [self._convert_neo4j_temporals(dict(record["c"])) for record in result]
+
+    def get_relationship_candidate(self, identifier: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single RelationshipCandidate by id or candidate_key."""
+        with self.session() as session:
+            result = session.run(
+                """
+                MATCH (c:RelationshipCandidate)
+                WHERE c.id = $identifier OR c.candidate_key = $identifier
+                RETURN c
+                """,
+                identifier=identifier,
+            ).single()
+
+            if result:
+                return self._convert_neo4j_temporals(dict(result["c"]))
+            return None
 
     def drop_schema(self) -> None:
         """Drop all constraints and indexes (use with caution)."""

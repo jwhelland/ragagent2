@@ -19,7 +19,7 @@ class ExtractedEntity(BaseModel):
     document_id: Optional[str] = None
     source: str = "unknown"
     raw: Dict[str, Any] | None = None
-    
+
     # Optional fields for provenance (e.g. from spaCy)
     start_char: Optional[int] = None
     end_char: Optional[int] = None
@@ -34,8 +34,10 @@ class ExtractedRelationship(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: str
+    source_type: Optional[str] = None
     type: str
     target: str
+    target_type: Optional[str] = None
     description: str = ""
     confidence: float = 0.0
     bidirectional: bool = False

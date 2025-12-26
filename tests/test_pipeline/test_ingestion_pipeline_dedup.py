@@ -37,7 +37,7 @@ class _StubDeduplicator:
                     entity_type=left.entity_type,
                     similarity=0.93,
                     confidence=0.91,
-                    auto_merge=True,
+                    auto_merge=False,
                     reason="stub",
                 )
             ],

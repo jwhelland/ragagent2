@@ -71,6 +71,8 @@ class NormalizationRules(BaseModel):
         }
     )
     strip_characters: List[str] = Field(default_factory=lambda: ["\u200b", "\ufeff"])
+    strip_articles: List[str] = Field(default_factory=lambda: ["the", "a", "an"])
+    enable_article_stripping: bool = True
     keep_symbols: List[str] = Field(
         default_factory=lambda: ["+", "#", "-", "/", "_", ".", ":", "'"]
     )
@@ -140,6 +142,13 @@ class StringNormalizer:
         self._unwanted_punct_re = re.compile(rf"[^\w\s{allowed_symbols}]")
         self._whitespace_re = re.compile(r"\s+")
 
+        # Leading articles regex
+        if self.rules.strip_articles:
+            articles_pattern = "|".join(re.escape(a) for a in self.rules.strip_articles)
+            self._articles_re = re.compile(rf"^({articles_pattern})\s+", re.IGNORECASE)
+        else:
+            self._articles_re = None
+
         logger.info(f"Loaded normalization rules from {rules_file}")
 
     def normalize(self, text: str | None) -> NormalizationResult:
@@ -175,10 +184,25 @@ class StringNormalizer:
         text = self._tighten_technical_symbols(text)
         text = self._collapse_whitespace(text)
 
+        if self.rules.enable_article_stripping:
+            text = self._strip_leading_articles(text)
+
         if lowercase and self.rules.lowercase:
             text = text.lower()
 
         return text.strip()
+
+    def _strip_leading_articles(self, text: str) -> str:
+        if not self._articles_re:
+            return text
+
+        # Strip recursively in case of multiple articles (unlikely but safe)
+        while True:
+            new_text = self._articles_re.sub("", text)
+            if new_text == text or not new_text.strip():
+                break
+            text = new_text
+        return text
 
     def _normalize_unicode(self, text: str) -> str:
         return unicodedata.normalize(self.rules.unicode_form, text)

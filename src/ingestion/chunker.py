@@ -117,6 +117,7 @@ class HierarchicalChunker:
                     parsed_doc.document_id,
                     section_chunk.chunk_id,
                     section_chunk.metadata.get("hierarchy_path", ""),
+                    section_chunk.metadata,
                 )
                 all_chunks.extend(subsection_chunks)
                 section_chunk.child_chunk_ids = [c.chunk_id for c in subsection_chunks]
@@ -205,6 +206,7 @@ class HierarchicalChunker:
                 content=section.content,
                 metadata={
                     "document_title": parsed_doc.metadata.get("title", ""),
+                    "filename": parsed_doc.metadata.get("filename", ""),
                     "section_title": section.title,
                     "page_numbers": list(range(section.start_page, section.end_page + 1)),
                     "hierarchy_path": section.hierarchy_path or str(i),
@@ -218,7 +220,12 @@ class HierarchicalChunker:
         return chunks
 
     def _create_subsection_chunks(
-        self, subsections: List[Section], document_id: str, parent_id: str, parent_path: str
+        self,
+        subsections: List[Section],
+        document_id: str,
+        parent_id: str,
+        parent_path: str,
+        parent_metadata: Dict[str, Any],
     ) -> List[Chunk]:
         """Create level 3 chunks (subsections).
 
@@ -227,6 +234,7 @@ class HierarchicalChunker:
             document_id: Document ID
             parent_id: ID of parent (section) chunk
             parent_path: Hierarchy path of parent
+            parent_metadata: Metadata from parent chunk
 
         Returns:
             List of subsection-level chunks
@@ -234,19 +242,26 @@ class HierarchicalChunker:
         chunks: List[Chunk] = []
 
         for i, subsection in enumerate(subsections, 1):
+            # Inherit relevant metadata from parent
+            metadata = parent_metadata.copy()
+            # Update/override with subsection specifics
+            metadata.update(
+                {
+                    "subsection_title": subsection.title,
+                    "page_numbers": list(range(subsection.start_page, subsection.end_page + 1)),
+                    "hierarchy_path": subsection.hierarchy_path or f"{parent_path}.{i}",
+                    "has_tables": len(subsection.tables) > 0,
+                    "has_figures": len(subsection.figures) > 0,
+                }
+            )
+
             chunk = Chunk(
                 chunk_id=str(uuid.uuid4()),
                 document_id=document_id,
                 level=3,
                 parent_chunk_id=parent_id,
                 content=subsection.content,
-                metadata={
-                    "subsection_title": subsection.title,
-                    "page_numbers": list(range(subsection.start_page, subsection.end_page + 1)),
-                    "hierarchy_path": subsection.hierarchy_path or f"{parent_path}.{i}",
-                    "has_tables": len(subsection.tables) > 0,
-                    "has_figures": len(subsection.figures) > 0,
-                },
+                metadata=metadata,
                 token_count=self._count_tokens(subsection.content),
             )
             chunks.append(chunk)

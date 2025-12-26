@@ -5,8 +5,8 @@ entity_extraction:
     You are an expert at extracting structured entities from technical and engineering documents.
     Follow the provided schema exactly and keep outputs deterministic. Avoid Markdown,
     preambles, or explanations. Prefer evidence-backed entities; when nothing qualifies, respond
-    with an object whose "entities" value is an empty list. Normalize entity names to lower_snake_case
-    and keep abbreviations in aliases.
+    with an object whose "entities" value is an empty list. Use the canonical name found in the text
+    (preserve capitalization and spaces) and keep abbreviations in aliases.
 
   user_template: |
     Extract entities from the text using the schema and allowed labels below.
@@ -25,11 +25,12 @@ entity_extraction:
     - TABLE: table referenced by number or caption
     - FIGURE: figure referenced by number or caption
     - ORGANIZATION: company, institution, agency, or research center (e.g., NASA, SpaceX, JPL)
+    - PERSON: individual human entity (e.g., Elon Musk, engineers, operators)
 
     Output JSON schema (apply strictly):
     - Root object with required key "entities".
     - "entities": array of entity objects.
-    - Entity object required fields: name (lower_snake_case string), type (enum above),
+    - Entity object required fields: name (string), type (enum above),
       description (concise, evidence-based), confidence (float 0-1).
     - Optional fields: aliases (unique strings), source_sentence (verbatim supporting text).
 
@@ -118,7 +119,6 @@ relationship_extraction:
     - SIMILAR_TO: source is similar to target
     - CAUSED_BY: source is caused by target
     - MITIGATED_BY: source is mitigated by target
-    - RELATED_TO: source has a generic relation to target
     - REFERENCES_TABLE / REFERENCES_FIGURE: source points to a table/figure
     - DEFINED_IN_TABLE / SHOWN_IN_FIGURE: target defines or shows source
     - CONTAINS_TABLE / CONTAINS_FIGURE: source section contains the table/figure
@@ -127,14 +127,17 @@ relationship_extraction:
     Output JSON schema:
     - Root object with required key "relationships".
     - "relationships": array of relationship objects.
-    - Relationship required fields: source (string), type (enum above), target (string),
+    - Relationship required fields: source (string), source_type (enum from entity types), type (enum above), target (string), target_type (enum from entity types),
       description (concise evidence-backed clause), confidence (float 0-1).
     - Optional fields: bidirectional (boolean), evidence (verbatim supporting text).
 
     Extraction rules:
-    - Use entity names from the known entity list when they match; otherwise normalize to lower_snake_case.
+    - Use entity names from the known entity list when they match; otherwise use the canonical name found in the text.
+    - Provide source_type and target_type even for known entities; this helps validate and discover missed entities.
     - Avoid duplicate inverse pairs; set bidirectional to true when the text states mutual linkage.
     - Prefer structural, functional, or procedural relations; ignore vague co-occurrence.
+    - For IS_A: only use when target is a category/type, not an attribute or adjective.
+    - For SIMILAR_TO: only use when entities serve similar purposes, not just mentioned together.
     - If no valid relationship is present, return an empty list.
 
     Text:
@@ -152,8 +155,10 @@ relationship_extraction:
       "relationships": [
         {{
           "source": "battery",
+          "source_type": "COMPONENT",
           "type": "DEPENDS_ON",
           "target": "solar_array",
+          "target_type": "COMPONENT",
           "description": "Battery relies on solar array output for charging",
           "evidence": "The battery depends on the solar array for charging during daylight passes.",
           "confidence": 0.92,
@@ -169,30 +174,26 @@ relationship_extraction:
          "relationships": [
            {{
              "source": "thermal_control_system",
+             "source_type": "SUBSYSTEM",
              "type": "MONITORS",
              "target": "temperature_sensor",
+             "target_type": "COMPONENT",
              "description": "Thermal control reads temperature sensors for each subsystem",
              "confidence": 0.90,
              "bidirectional": false
            }}
          ]
        }}
-    2) Text: "Procedure step 3 requires check of Table 2 before antenna deployment."
+    2) Text: "Procedure step 3 (Verify Table 2) ensures transponder configuration."
        Output:
        {{
          "relationships": [
            {{
              "source": "procedure_step_3",
-             "type": "REQUIRES_CHECK",
-             "target": "table_2",
-             "description": "Step 3 must verify Table 2 before deployment",
-             "confidence": 0.88,
-             "bidirectional": false
-           }},
-           {{
-             "source": "procedure_step_3",
+             "source_type": "PROCEDURE_STEP",
              "type": "REFERENCES_TABLE",
              "target": "table_2",
+             "target_type": "TABLE",
              "description": "Step 3 references Table 2",
              "confidence": 0.82,
              "bidirectional": false
@@ -211,7 +212,7 @@ output_schemas:
           type: object
           required: ["name", "type", "description", "confidence"]
           properties:
-            name: {type: string, pattern: "^[a-z0-9_]+$"}
+            name: {type: string}
             type:
               type: string
               enum:
@@ -228,6 +229,7 @@ output_schemas:
                 - TABLE
                 - FIGURE
                 - ORGANIZATION
+                - PERSON
             description: {type: string}
             aliases:
               type: array
@@ -274,7 +276,6 @@ output_schemas:
                 - SIMILAR_TO
                 - CAUSED_BY
                 - MITIGATED_BY
-                - RELATED_TO
                 - REFERENCES_TABLE
                 - REFERENCES_FIGURE
                 - DEFINED_IN_TABLE

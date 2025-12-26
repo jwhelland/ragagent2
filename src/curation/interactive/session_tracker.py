@@ -13,12 +13,17 @@ class SessionStats(BaseModel):
     """Statistics for a review session."""
 
     start_time: datetime = Field(default_factory=datetime.now)
+    # Entity statistics
     approved_count: int = 0
     rejected_count: int = 0
     edited_count: int = 0
     flagged_count: int = 0
     undo_count: int = 0
     merged_count: int = 0
+    # Relationship statistics
+    relationship_approved_count: int = 0
+    relationship_rejected_count: int = 0
+    # Total across all types
     total_processed: int = 0
 
     @property
@@ -97,6 +102,16 @@ class SessionTracker:
         """Record a merge action."""
         self.stats.merged_count += 1
 
+    def record_relationship_approval(self) -> None:
+        """Record a relationship approval action."""
+        self.stats.relationship_approved_count += 1
+        self.stats.total_processed += 1
+
+    def record_relationship_rejection(self) -> None:
+        """Record a relationship rejection action."""
+        self.stats.relationship_rejected_count += 1
+        self.stats.total_processed += 1
+
     def estimate_time_remaining(self, candidates_remaining: int) -> str:
         """Estimate time remaining based on current velocity.
 
@@ -128,11 +143,13 @@ class SessionTracker:
         """
         return {
             "elapsed_time": self.stats.formatted_elapsed,
-            "approved": self.stats.approved_count,
-            "rejected": self.stats.rejected_count,
-            "edited": self.stats.edited_count,
+            "entities_approved": self.stats.approved_count,
+            "entities_rejected": self.stats.rejected_count,
+            "entities_edited": self.stats.edited_count,
+            "entities_merged": self.stats.merged_count,
+            "relationships_approved": self.stats.relationship_approved_count,
+            "relationships_rejected": self.stats.relationship_rejected_count,
             "flagged": self.stats.flagged_count,
-            "merged": self.stats.merged_count,
             "total_processed": self.stats.total_processed,
             "velocity": f"{self.stats.velocity:.1f}/min",
         }

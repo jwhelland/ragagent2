@@ -28,7 +28,10 @@ class EntityResultItem(ListItem):
     def compose(self) -> ComposeResult:
         yield Label(f"[bold]{self.entity_name}[/bold] ({self.entity_type})")
         if self.entity_data.get("description"):
-            yield Label(f"[italic]{self.entity_data.get('description')[:80]}...[/italic]", classes="result-desc")
+            yield Label(
+                f"[italic]{self.entity_data.get('description')[:80]}...[/italic]",
+                classes="result-desc",
+            )
 
 
 class EntitySearchModal(ModalScreen[Optional[Dict[str, Any]]]):
@@ -93,7 +96,7 @@ class EntitySearchModal(ModalScreen[Optional[Dict[str, Any]]]):
                 yield Input(
                     value=self.initial_query,
                     placeholder="Search by name...",
-                    id="entity-search-input"
+                    id="entity-search-input",
                 )
                 yield Select(
                     options=[("All Types", None)] + [(t.value, t.value) for t in EntityType],
@@ -130,7 +133,7 @@ class EntitySearchModal(ModalScreen[Optional[Dict[str, Any]]]):
                 query=query,
                 entity_types=[EntityType(type_filter)] if type_filter else None,
                 status=EntityStatus.APPROVED,
-                limit=20
+                limit=20,
             )
             self.app.call_from_thread(self.update_results, results)
         except Exception as e:
@@ -150,7 +153,9 @@ class EntitySearchModal(ModalScreen[Optional[Dict[str, Any]]]):
     @on(Button.Pressed, "#select-btn")
     def on_select_pressed(self) -> None:
         list_view = self.query_one("#results-list", ListView)
-        if list_view.highlighted_child and isinstance(list_view.highlighted_child, EntityResultItem):
+        if list_view.highlighted_child and isinstance(
+            list_view.highlighted_child, EntityResultItem
+        ):
             self.dismiss(list_view.highlighted_child.entity_data)
 
     @on(Button.Pressed, "#cancel-btn")

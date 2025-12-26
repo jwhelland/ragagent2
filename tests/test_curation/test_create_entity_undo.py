@@ -11,7 +11,7 @@ from src.normalization.normalization_table import (
     NormalizationMethod,
     NormalizationTable,
 )
-from src.storage.schemas import CandidateStatus, EntityType, RelationshipCandidate
+from src.storage.schemas import CandidateStatus, EntityType
 from src.utils.config import Config
 
 
@@ -50,7 +50,7 @@ class _FakeManager:
     def delete_relationship(self, relationship_id: str) -> bool:
         self.deleted_relationships.append(relationship_id)
         return True
-    
+
     def get_relationship(self, relationship_id: str) -> Dict[str, Any] | None:
         return None
 
@@ -75,7 +75,7 @@ def test_create_entity_and_undo(tmp_path: Path) -> None:
     assert manager.entity_upserts, "Entity should be upserted"
     assert manager.entity_upserts[0]["canonical_name"] == "new_system"
     assert manager.entity_upserts[0]["entity_type"] == "SYSTEM"
-    
+
     # Check normalization
     record = table.lookup("New System")
     assert record is not None
@@ -87,7 +87,7 @@ def test_create_entity_and_undo(tmp_path: Path) -> None:
 
     # Verify entity deletion
     assert manager.deleted_entities == [entity_id]
-    
+
     # Verify normalization rollback
     record = table.lookup("New System")
     assert record is None
@@ -135,7 +135,7 @@ def test_create_entity_promotes_relationships_and_undo(tmp_path: Path) -> None:
     ]
 
     # 1. Create Entity (should trigger promotion)
-    entity_id = service.create_entity(
+    service.create_entity(
         name="New System",
         entity_type=EntityType.SYSTEM,
     )
@@ -143,7 +143,7 @@ def test_create_entity_promotes_relationships_and_undo(tmp_path: Path) -> None:
     # Check relationship promotion
     assert manager.relationship_upserts, "Relationship should be promoted"
     assert manager.relationship_status_updates[-1] == ("relcand-1", CandidateStatus.APPROVED)
-    
+
     created_rel_id = manager.relationship_upserts[0]["id"]
 
     # 2. Undo
@@ -151,7 +151,7 @@ def test_create_entity_promotes_relationships_and_undo(tmp_path: Path) -> None:
 
     # Verify relationship deletion and status revert
     assert manager.deleted_relationships == [created_rel_id]
-    
+
     # The undo logic calls update_relationship_candidate_status to restore PREVIOUS status
     # Check if we have an update setting it back to pending
     # The last update should be to PENDING

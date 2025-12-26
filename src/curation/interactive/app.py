@@ -8,7 +8,8 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
 from textual.reactive import reactive
-from textual.widgets import Footer, Header, Static
+from textual.widget import Widget
+from textual.widgets import Footer, Static
 
 from src.curation.batch_operations import BatchCurationService
 from src.curation.entity_approval import (
@@ -19,6 +20,7 @@ from src.curation.entity_approval import (
 from src.curation.interactive.command_parser import CommandHistory, ParsedCommand
 from src.curation.interactive.keybindings import ALL_BINDINGS
 from src.curation.interactive.preferences import PreferencesManager
+from src.curation.interactive.review_mode import ReviewMode
 from src.curation.interactive.session_tracker import SessionTracker
 from src.curation.interactive.tui_logging import setup_tui_logging
 from src.curation.interactive.widgets import (
@@ -42,12 +44,14 @@ from src.curation.interactive.widgets import (
     SearchModalScreen,
     StatusBar,
 )
+from src.curation.interactive.widgets.relationship_detail_panel import RelationshipDetailPanel
 from src.normalization.normalization_table import NormalizationTable
 from src.storage.neo4j_manager import Neo4jManager
 from src.storage.schemas import (
     CandidateStatus,
     EntityCandidate,
     EntityType,
+    RelationshipCandidate,
 )
 from src.utils.config import Config, load_config
 
@@ -57,6 +61,48 @@ class LoadingMessage(Static):
 
     def compose(self) -> ComposeResult:
         yield Static("Loading candidates from Neo4j...", classes="loading")
+
+
+class CustomHeader(Widget):
+    """CustomHeader widget to avoid Textual Header bug."""
+
+    DEFAULT_CSS = """
+    CustomHeader {
+        dock: top;
+        height: 1;
+        background: $accent;
+        color: $text;
+        content-align: center middle;
+    }
+    """
+
+    title: reactive[str] = reactive("")
+    subtitle: reactive[str] = reactive("")
+
+    def compose(self) -> ComposeResult:
+        yield Static(id="header-content")
+
+    def watch_title(self) -> None:
+        """Update display when title changes."""
+        self._update_display()
+
+    def watch_subtitle(self) -> None:
+        """Update display when subtitle changes."""
+        self._update_display()
+
+    def _update_display(self) -> None:
+        """Update the header display."""
+        try:
+            content = self.query_one("#header-content", Static)
+            display_text = self.title
+            if self.subtitle:
+                if self.title:
+                    display_text = f"{self.title} │ {self.subtitle}"
+                else:
+                    display_text = self.subtitle
+            content.update(display_text)
+        except Exception:
+            pass
 
 
 class ReviewApp(App):
@@ -86,6 +132,13 @@ class ReviewApp(App):
     }
 
     DetailPanel {
+        width: 30%;
+        height: 100%;
+        border: solid $secondary;
+        padding: 1;
+    }
+
+    RelationshipDetailPanel {
         width: 30%;
         height: 100%;
         border: solid $secondary;
@@ -129,7 +182,10 @@ class ReviewApp(App):
 
     # Reactive attributes for application state
     is_loading: reactive[bool] = reactive(True, recompose=True)
+    review_mode: reactive[ReviewMode] = reactive(ReviewMode.ENTITY, recompose=True)
     candidates: reactive[List[EntityCandidate]] = reactive([], recompose=True)
+    relationship_candidates: reactive[List[RelationshipCandidate]] = reactive([], recompose=True)
+    total_candidate_count: reactive[int] = reactive(0)  # Total count in DB
     current_index: reactive[int] = reactive(0)
     filter_status: reactive[str] = reactive("pending")
     approved_count: reactive[int] = reactive(0)
@@ -176,10 +232,14 @@ class ReviewApp(App):
             self._startup_error = f"Failed to load config: {e}"
 
     @property
-    def current_candidate(self) -> Optional[EntityCandidate]:
-        """Get the currently selected candidate."""
-        if 0 <= self.current_index < len(self.candidates):
-            return self.candidates[self.current_index]
+    def current_candidate(self) -> Optional[EntityCandidate | RelationshipCandidate]:
+        """Get the currently selected candidate (entity or relationship based on review mode)."""
+        if self.review_mode == ReviewMode.ENTITY:
+            if 0 <= self.current_index < len(self.candidates):
+                return self.candidates[self.current_index]
+        else:  # ReviewMode.RELATIONSHIP
+            if 0 <= self.current_index < len(self.relationship_candidates):
+                return self.relationship_candidates[self.current_index]
         return None
 
     def _set_focus_to_candidate_list(self) -> None:
@@ -199,13 +259,31 @@ class ReviewApp(App):
 
             # Update status bar reactive attributes
             status_bar.elapsed_time = stats.formatted_elapsed
+            status_bar.review_mode = self.review_mode
+            # Entity stats
             status_bar.approved_count = stats.approved_count
             status_bar.rejected_count = stats.rejected_count
+            # Relationship stats
+            status_bar.relationship_approved_count = stats.relationship_approved_count
+            status_bar.relationship_rejected_count = stats.relationship_rejected_count
+            # Universal stats
             status_bar.velocity = stats.velocity
-            status_bar.total_candidates = len(self.candidates)
 
-            # Calculate remaining candidates (pending only)
-            pending_count = sum(1 for c in self.candidates if c.status == CandidateStatus.PENDING)
+            # Set total candidates from our reactive variable
+            status_bar.total_candidates = self.total_candidate_count
+            # logger.debug(f"Updating status bar total: {self.total_candidate_count}")
+
+            # Calculate remaining candidates (pending only) based on loaded batch
+            # Ideally this should also be a total count from DB, but for now we approximate with loaded batch
+            if self.review_mode == ReviewMode.ENTITY:
+                pending_count = sum(
+                    1 for c in self.candidates if c.status == CandidateStatus.PENDING
+                )
+            else:  # ReviewMode.RELATIONSHIP
+                pending_count = sum(
+                    1 for c in self.relationship_candidates if c.status == CandidateStatus.PENDING
+                )
+
             status_bar.time_remaining = self.session_tracker.estimate_time_remaining(pending_count)
         except Exception:
             # Widget might not exist yet during startup
@@ -250,9 +328,12 @@ class ReviewApp(App):
             f"\n📊 Session Summary\n"
             f"{ '='*40}\n"
             f"Time elapsed: {summary['elapsed_time']}\n"
-            f"Approved: {summary['approved']}\n"
-            f"Rejected: {summary['rejected']}\n"
-            f"Edited: {summary['edited']}\n"
+            f"Entities Approved: {summary['entities_approved']}\n"
+            f"Entities Rejected: {summary['entities_rejected']}\n"
+            f"Entities Edited: {summary['entities_edited']}\n"
+            f"Entities Merged: {summary['entities_merged']}\n"
+            f"Relationships Approved: {summary['relationships_approved']}\n"
+            f"Relationships Rejected: {summary['relationships_rejected']}\n"
             f"Total processed: {summary['total_processed']}\n"
             f"Velocity: {summary['velocity']}\n"
             f"{ '='*40}\n"
@@ -262,21 +343,43 @@ class ReviewApp(App):
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
-        yield Header()
+        yield CustomHeader()
         if self.is_loading:
             yield LoadingMessage()
         else:
             with Horizontal(id="main-container"):
-                yield CandidateList(candidates=self.candidates)
-                yield DetailPanel(candidate=self.current_candidate)
+                # Pass the appropriate candidates list based on review mode
+                candidate_list = (
+                    self.candidates
+                    if self.review_mode == ReviewMode.ENTITY
+                    else self.relationship_candidates
+                )
+                yield CandidateList(candidates=candidate_list)
+
+                # Render the appropriate detail panel based on review mode
+                if self.review_mode == ReviewMode.ENTITY:
+                    yield DetailPanel(candidate=self.current_candidate)
+                else:
+                    yield RelationshipDetailPanel(candidate=self.current_candidate)
+
                 yield ContextPanel()
         yield StatusBar()
         yield Footer()
 
     def on_mount(self) -> None:
         """Handle app mount event."""
-        self.title = "Entity Candidate Review"
-        self._update_subtitle()
+
+        # Set initial title and subtitle
+        def set_title() -> None:
+            try:
+                header = self.query_one(CustomHeader)
+                # Title is now empty by default
+                pass
+            except Exception:
+                pass
+            self._update_subtitle()
+
+        self.call_after_refresh(set_title)
 
         if self._startup_error:
             self.notify(self._startup_error, severity="error")
@@ -346,21 +449,49 @@ class ReviewApp(App):
             manager.connect()
 
             try:
-                candidates = []
-                results = manager.get_entity_candidates(
-                    status=self.filter_status if self.filter_status != "all" else None,
-                    limit=50,  # Pagination - fetch 50 at a time
-                    offset=0,
-                )
-                # Convert to EntityCandidate objects
-                for i, r in enumerate(results):
-                    try:
-                        candidates.append(EntityCandidate.model_validate(r))
-                    except Exception as validation_error:
-                        logger.error(
-                            f"Failed to validate candidate {i}: {validation_error}\nData: {r}"
-                        )
-                        continue
+                # Branch based on review mode
+                if self.review_mode == ReviewMode.ENTITY:
+                    candidates = []
+                    # Fetch total count
+                    total_count = manager.get_total_entity_candidate_count(
+                        status=self.filter_status if self.filter_status != "all" else None,
+                    )
+                    
+                    results = manager.get_entity_candidates(
+                        status=self.filter_status if self.filter_status != "all" else None,
+                        limit=50,  # Pagination - fetch 50 at a time
+                        offset=0,
+                    )
+                    # Convert to EntityCandidate objects
+                    for i, r in enumerate(results):
+                        try:
+                            candidates.append(EntityCandidate.model_validate(r))
+                        except Exception as validation_error:
+                            logger.error(
+                                f"Failed to validate entity candidate {i}: {validation_error}\nData: {r}"
+                            )
+                            continue
+                else:  # ReviewMode.RELATIONSHIP
+                    candidates = []
+                    # Fetch total count
+                    total_count = manager.get_total_relationship_candidate_count(
+                        status=self.filter_status if self.filter_status != "all" else None,
+                    )
+
+                    results = manager.get_relationship_candidates(
+                        status=self.filter_status if self.filter_status != "all" else None,
+                        limit=50,  # Pagination - fetch 50 at a time
+                        offset=0,
+                    )
+                    # Convert to RelationshipCandidate objects
+                    for i, r in enumerate(results):
+                        try:
+                            candidates.append(RelationshipCandidate.model_validate(r))
+                        except Exception as validation_error:
+                            logger.error(
+                                f"Failed to validate relationship candidate {i}: {validation_error}\nData: {r}"
+                            )
+                            continue
 
                 # Apply client-side filters if search is active
                 search_results = []
@@ -369,6 +500,12 @@ class ReviewApp(App):
                         candidates, self.current_filters
                     )
                     candidates = filtered_candidates
+                    # If filtered, total count is the filtered count (for this page)
+                    # Ideally we'd query DB with filters, but for now we'll stick to client-side filtering on the page
+                    if len(candidates) < total_count:
+                         # This is inaccurate if filters reduce the count significantly, but accurate for "displayed" items
+                         # A better approach would be to push filters to DB query
+                         pass
 
                 # Calculate target index before any updates
                 if preserve_index and candidates:
@@ -379,6 +516,7 @@ class ReviewApp(App):
                 self.call_from_thread(
                     self._apply_loaded_candidates,
                     candidates,
+                    total_count,
                     target_index,
                     notification,
                     show_loaded_notification,
@@ -446,14 +584,21 @@ class ReviewApp(App):
 
     def _apply_loaded_candidates(
         self,
-        candidates: List[EntityCandidate],
+        candidates: List[EntityCandidate | RelationshipCandidate],
+        total_count: int,
         target_index: int,
         notification: Optional[str],
         show_loaded_notification: bool,
         search_results: Optional[List[int]] = None,
     ) -> None:
         """Apply loaded candidates to the UI (must run on the UI thread)."""
-        self.candidates = candidates
+        # Store candidates in the appropriate list based on review mode
+        if self.review_mode == ReviewMode.ENTITY:
+            self.candidates = candidates  # type: ignore[assignment]
+        else:  # ReviewMode.RELATIONSHIP
+            self.relationship_candidates = candidates  # type: ignore[assignment]
+
+        self.total_candidate_count = total_count
         self.is_loading = False
 
         # Store search results for n/N navigation
@@ -469,8 +614,12 @@ class ReviewApp(App):
             if candidates:
                 # Ensure detail panel updates even if selection doesn't change.
                 try:
-                    detail_panel = self.query_one(DetailPanel)
-                    detail_panel.update_candidate(self.current_candidate)
+                    if self.review_mode == ReviewMode.ENTITY:
+                        detail_panel = self.query_one(DetailPanel)
+                        detail_panel.candidate = self.current_candidate
+                    else:
+                        detail_panel = self.query_one(RelationshipDetailPanel)
+                        detail_panel.candidate = self.current_candidate
                 except Exception:
                     pass
 
@@ -479,7 +628,10 @@ class ReviewApp(App):
             elif not candidates:
                 self.notify("No candidates found", severity="information")
             elif show_loaded_notification:
-                self.notify(f"Loaded {len(candidates)} candidates", severity="information")
+                mode_str = "entity" if self.review_mode == ReviewMode.ENTITY else "relationship"
+                self.notify(
+                    f"Loaded {len(candidates)} of {total_count} {mode_str} candidates", severity="information"
+                )
 
         self.call_after_refresh(finalize)
 
@@ -752,9 +904,7 @@ class ReviewApp(App):
             service.manager.close()
 
     @work(thread=True)
-    def reject_candidate(
-        self, candidate: EntityCandidate, reason: str = ""
-    ) -> None:
+    def reject_candidate(self, candidate: EntityCandidate, reason: str = "") -> None:
         """Reject a candidate and update UI.
 
         Runs in worker thread to avoid blocking UI.
@@ -783,6 +933,77 @@ class ReviewApp(App):
         except Exception as e:
             self.call_from_thread(
                 self.notify, f"✗ Error rejecting candidate: {e}", severity="error", markup=False
+            )
+        finally:
+            service.manager.close()
+
+    @work(thread=True)
+    def approve_relationship_candidate(self, candidate: RelationshipCandidate) -> None:
+        """Approve a relationship candidate and update UI.
+
+        Runs in worker thread to avoid blocking UI.
+
+        Args:
+            candidate: The relationship candidate to approve
+        """
+        service = self.get_curation_service()
+        try:
+            service.approve_relationship_candidate(candidate)
+            rel_key = f"{candidate.source} → {candidate.type} → {candidate.target}"
+
+            def on_success() -> None:
+                self.session_tracker.record_relationship_approval()
+                self.load_candidates(
+                    preserve_index=True,
+                    notification=f"✓ Approved relationship: {rel_key}",
+                    show_loaded_notification=False,
+                )
+
+            self.call_from_thread(on_success)
+
+        except Exception as e:
+            self.call_from_thread(
+                self.notify,
+                f"✗ Error approving relationship: {e}",
+                severity="error",
+                markup=False,
+            )
+        finally:
+            service.manager.close()
+
+    @work(thread=True)
+    def reject_relationship_candidate(
+        self, candidate: RelationshipCandidate, reason: str = ""
+    ) -> None:
+        """Reject a relationship candidate and update UI.
+
+        Runs in worker thread to avoid blocking UI.
+
+        Args:
+            candidate: The relationship candidate to reject
+            reason: Optional reason for rejection
+        """
+        service = self.get_curation_service()
+        try:
+            service.reject_relationship_candidate(candidate, reason=reason)
+            rel_key = f"{candidate.source} → {candidate.type} → {candidate.target}"
+
+            def on_success() -> None:
+                self.session_tracker.record_relationship_rejection()
+                self.load_candidates(
+                    preserve_index=True,
+                    notification=f"✗ Rejected relationship: {rel_key}",
+                    show_loaded_notification=False,
+                )
+
+            self.call_from_thread(on_success)
+
+        except Exception as e:
+            self.call_from_thread(
+                self.notify,
+                f"✗ Error rejecting relationship: {e}",
+                severity="error",
+                markup=False,
             )
         finally:
             service.manager.close()
@@ -894,9 +1115,7 @@ class ReviewApp(App):
             service.manager.close()
 
     @work(thread=True)
-    def batch_approve_candidates(
-        self, candidates: List[EntityCandidate]
-    ) -> None:
+    def batch_approve_candidates(self, candidates: List[EntityCandidate]) -> None:
         """Batch approve multiple candidates.
 
         Runs in worker thread to avoid blocking UI.
@@ -949,9 +1168,7 @@ class ReviewApp(App):
             service.manager.close()
 
     @work(thread=True)
-    def batch_reject_candidates(
-        self, candidates: List[EntityCandidate]
-    ) -> None:
+    def batch_reject_candidates(self, candidates: List[EntityCandidate]) -> None:
         """Batch reject multiple candidates.
 
         Runs in worker thread to avoid blocking UI.
@@ -1070,7 +1287,9 @@ class ReviewApp(App):
                             )
                             return
                         else:
-                            logger.info(f"No neighborhood issues found for merged entity {merged_entity_id}")
+                            logger.info(
+                                f"No neighborhood issues found for merged entity {merged_entity_id}"
+                            )
                     else:
                         logger.warning("No merged entity ID returned from batch operation")
 
@@ -1094,13 +1313,28 @@ class ReviewApp(App):
 
     # Action handlers (called by key bindings)
 
+    def action_toggle_review_mode(self) -> None:
+        """Toggle between entity and relationship review modes (bound to 't' key)."""
+        # Toggle the mode
+        self.review_mode = (
+            ReviewMode.RELATIONSHIP if self.review_mode == ReviewMode.ENTITY else ReviewMode.ENTITY
+        )
+        # Reset index when switching modes
+        self.current_index = 0
+        # Reload candidates for the new mode
+        self.load_candidates(show_loading=True, show_loaded_notification=True)
+
     def action_approve_current(self) -> None:
         """Handle approve action (bound to 'a' key)."""
         if self.current_candidate:
             if self.current_candidate.status == CandidateStatus.APPROVED:
                 self.notify("Already approved", severity="warning")
             else:
-                self.approve_candidate(self.current_candidate)
+                # Call the appropriate approve method based on candidate type
+                if isinstance(self.current_candidate, EntityCandidate):
+                    self.approve_candidate(self.current_candidate)
+                elif isinstance(self.current_candidate, RelationshipCandidate):
+                    self.approve_relationship_candidate(self.current_candidate)
         else:
             self.notify("No candidate selected", severity="warning")
 
@@ -1110,7 +1344,11 @@ class ReviewApp(App):
             if self.current_candidate.status == CandidateStatus.REJECTED:
                 self.notify("Already rejected", severity="warning")
             else:
-                self.reject_candidate(self.current_candidate)
+                # Call the appropriate reject method based on candidate type
+                if isinstance(self.current_candidate, EntityCandidate):
+                    self.reject_candidate(self.current_candidate)
+                elif isinstance(self.current_candidate, RelationshipCandidate):
+                    self.reject_relationship_candidate(self.current_candidate)
         else:
             self.notify("No candidate selected", severity="warning")
 
@@ -1217,9 +1455,7 @@ class ReviewApp(App):
                             service, candidate.canonical_name, candidate.aliases
                         )
                         # Also check the target entity name itself
-                        issues.extend(
-                            get_neighborhood_issues(service, entity_name, [])
-                        )
+                        issues.extend(get_neighborhood_issues(service, entity_name, []))
 
                         if issues:
                             self._handle_entity_approved_ui(
@@ -1228,7 +1464,9 @@ class ReviewApp(App):
                             )
                             return
                         else:
-                            logger.info(f"No neighborhood issues found for merged entity {entity_name}")
+                            logger.info(
+                                f"No neighborhood issues found for merged entity {entity_name}"
+                            )
 
                     except Exception as e:
                         logger.error(f"Failed to check neighborhood issues after merge-into: {e}")
@@ -1912,8 +2150,13 @@ class ReviewApp(App):
             # Update detail panel with new candidate
             if self.current_candidate:
                 try:
-                    detail_panel = self.query_one(DetailPanel)
-                    detail_panel.update_candidate(self.current_candidate)
+                    # Query the appropriate detail panel based on review mode
+                    if self.review_mode == ReviewMode.ENTITY:
+                        detail_panel = self.query_one(DetailPanel)
+                        detail_panel.candidate = self.current_candidate
+                    else:  # ReviewMode.RELATIONSHIP
+                        detail_panel = self.query_one(RelationshipDetailPanel)
+                        detail_panel.candidate = self.current_candidate
                 except Exception:
                     # Detail panel doesn't exist yet
                     pass
@@ -1921,10 +2164,14 @@ class ReviewApp(App):
                 # Update context panel (duplicates + neighborhood)
                 try:
                     context_panel = self.query_one(ContextPanel)
+                    # Pass the appropriate candidates list based on mode
+                    all_candidates = (
+                        self.candidates
+                        if self.review_mode == ReviewMode.ENTITY
+                        else self.relationship_candidates
+                    )
                     context_panel.update_context(
-                        self.current_candidate,
-                        self.candidates,
-                        self.get_curation_service()
+                        self.current_candidate, all_candidates, self.get_curation_service()
                     )
                 except Exception:
                     # Panel doesn't exist yet
@@ -1954,17 +2201,51 @@ class ReviewApp(App):
         """
         self._update_subtitle()
 
+    def watch_review_mode(self, old: ReviewMode, new: ReviewMode) -> None:
+        """React to review mode changes by updating subtitle and showing notification.
+
+        This is a watch method that automatically runs when review_mode changes.
+        """
+        # Update title based on mode
+        try:
+            # We no longer set the title (it stays empty)
+            pass
+        except Exception:
+            pass
+
+        self._update_subtitle()
+        mode_name = "Entity" if new == ReviewMode.ENTITY else "Relationship"
+        self.notify(f"Switched to {mode_name} review mode", severity="information")
+
     def _update_subtitle(self) -> None:
         """Update the subtitle with current state information."""
+        # Mode and status
+        mode_str = "Entities" if self.review_mode == ReviewMode.ENTITY else "Relationships"
+
+        # Get total count based on mode
+        total_count = (
+            len(self.candidates)
+            if self.review_mode == ReviewMode.ENTITY
+            else len(self.relationship_candidates)
+        )
+
         parts = [
+            f"Mode: {mode_str}",
             f"Status: {self.filter_status}",
-            f"Total: {len(self.candidates)}",
+            f"Showing {total_count} of {self.total_candidate_count}",
         ]
 
         if self.selection_mode:
             parts.append(f"[SELECTION MODE] {len(self.selected_candidate_ids)} selected")
 
-        self.sub_title = " | ".join(parts)
+        subtitle_text = " | ".join(parts)
+
+        # Update custom header subtitle
+        try:
+            header = self.query_one(CustomHeader)
+            header.subtitle = subtitle_text
+        except Exception:
+            pass
 
 
 def run() -> None:

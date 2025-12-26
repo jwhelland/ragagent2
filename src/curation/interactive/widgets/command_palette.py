@@ -2,27 +2,27 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Protocol, Union
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical
-from textual.message import Message
-from textual.reactive import reactive
+from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
-from textual.widgets import Input, Label, ListItem, ListView, Static
+from textual.widgets import Input, Label, ListItem, ListView
 
 from src.storage.neo4j_manager import Neo4jManager
-from src.storage.schemas import CandidateStatus, EntityCandidate, EntityType, EntityStatus
+from src.storage.schemas import EntityCandidate, EntityStatus
 from src.utils.config import Config
 
 
 class PaletteResult(ListItem):
     """Base class for results in the command palette."""
-    def __init__(self, item: Any, label: str, sublabel: str = "", metadata: Dict[str, Any] | None = None) -> None:
+
+    def __init__(
+        self, item: Any, label: str, sublabel: str = "", metadata: Dict[str, Any] | None = None
+    ) -> None:
         super().__init__()
         self.item = item
         self.label = label
@@ -37,34 +37,34 @@ class PaletteResult(ListItem):
 
 class CandidateResult(PaletteResult):
     """A candidate result in the palette."""
+
     def __init__(self, candidate: EntityCandidate, index: int) -> None:
         super().__init__(
             item=candidate,
             label=candidate.canonical_name,
             sublabel=f"Candidate [{index+1}] ({candidate.candidate_type.value}) - {candidate.status.value}",
-            metadata={"type": "candidate", "index": index}
+            metadata={"type": "candidate", "index": index},
         )
 
 
 class EntityResult(PaletteResult):
     """An approved entity result in the palette."""
+
     def __init__(self, entity_data: Dict[str, Any]) -> None:
         super().__init__(
             item=entity_data,
             label=entity_data.get("canonical_name", "Unknown"),
             sublabel=f"Entity ({entity_data.get('entity_type', 'CONCEPT')}) - Approved",
-            metadata={"type": "entity", "id": entity_data.get("id")}
+            metadata={"type": "entity", "id": entity_data.get("id")},
         )
 
 
 class CommandResult(PaletteResult):
     """A command action result in the palette."""
+
     def __init__(self, command: str, description: str) -> None:
         super().__init__(
-            item=command,
-            label=f":{command}",
-            sublabel=description,
-            metadata={"type": "command"}
+            item=command, label=f":{command}", sublabel=description, metadata={"type": "command"}
         )
 
 
@@ -122,10 +122,7 @@ class CommandPalette(ModalScreen[Optional[Dict[str, Any]]]):
     """
 
     def __init__(
-        self, 
-        candidates: List[EntityCandidate], 
-        config: Config,
-        initial_text: str = ""
+        self, candidates: List[EntityCandidate], config: Config, initial_text: str = ""
     ) -> None:
         super().__init__()
         self.candidates = candidates
@@ -138,7 +135,7 @@ class CommandPalette(ModalScreen[Optional[Dict[str, Any]]]):
             yield Input(
                 placeholder="Search candidates, entities, or type :command...",
                 id="palette-input",
-                value=self.initial_text
+                value=self.initial_text,
             )
             yield ListView(id="results-list")
             with Horizontal(id="palette-footer"):
@@ -210,10 +207,10 @@ class CommandPalette(ModalScreen[Optional[Dict[str, Any]]]):
         for i, c in enumerate(self.candidates):
             if query in c.canonical_name.lower() or any(query in a.lower() for a in c.aliases):
                 matches.append(CandidateResult(c, i))
-            
+
             if len(matches) >= 10:
                 break
-        
+
         for m in matches:
             list_view.append(m)
 
@@ -223,6 +220,7 @@ class CommandPalette(ModalScreen[Optional[Dict[str, Any]]]):
             return
 
         import time
+
         time.sleep(0.1)  # Minimal debounce
 
         if not self._neo4j_manager:
@@ -230,9 +228,7 @@ class CommandPalette(ModalScreen[Optional[Dict[str, Any]]]):
 
         try:
             results = self._neo4j_manager.search_entities(
-                query=query,
-                status=EntityStatus.APPROVED,
-                limit=10
+                query=query, status=EntityStatus.APPROVED, limit=10
             )
             self.app.call_from_thread(self._append_entity_results, results)
         except Exception as e:
@@ -258,17 +254,17 @@ class CommandPalette(ModalScreen[Optional[Dict[str, Any]]]):
         if list_view.highlighted_child:
             item = list_view.highlighted_child
             if isinstance(item, PaletteResult):
-                self.dismiss({
-                    "type": item.metadata["type"],
-                    "item": item.item,
-                    "metadata": item.metadata
-                })
+                self.dismiss(
+                    {"type": item.metadata["type"], "item": item.item, "metadata": item.metadata}
+                )
 
     @on(ListView.Selected)
     def on_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, PaletteResult):
-            self.dismiss({
-                "type": event.item.metadata["type"],
-                "item": event.item.item,
-                "metadata": event.item.metadata
-            })
+            self.dismiss(
+                {
+                    "type": event.item.metadata["type"],
+                    "item": event.item.item,
+                    "metadata": event.item.metadata,
+                }
+            )

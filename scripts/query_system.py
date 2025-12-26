@@ -169,9 +169,6 @@ class QueryInterface:
             )
         )
 
-        if result.answer.chunks_used:
-            console.print(f"[dim]Sources: {', '.join(result.answer.chunks_used)}[/dim]")
-
         console.print(
             f"[dim]Strategy: {result.strategy_used.value} | Time: {result.retrieval_time_ms:.0f}ms[/dim]\n"
         )

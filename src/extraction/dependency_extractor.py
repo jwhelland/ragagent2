@@ -32,7 +32,9 @@ class DependencyRelationshipExtractor:
         self,
         chunk: Any,
         *,
-        known_entities: Optional[List[Dict[str, Any]]] = None, # Not strictly used yet, but good for filtering
+        known_entities: Optional[
+            List[Dict[str, Any]]
+        ] = None,  # Not strictly used yet, but good for filtering
         document_context: Optional[Dict[str, Any]] = None,
     ) -> List[ExtractedRelationship]:
         """Extract relationships from a chunk using dependency matching."""
@@ -43,8 +45,14 @@ class DependencyRelationshipExtractor:
         if not text:
             return []
 
-        chunk_id = getattr(chunk, "chunk_id", None) or getattr(chunk, "id", None) or (chunk.get("chunk_id") if isinstance(chunk, dict) else None)
-        document_id = getattr(chunk, "document_id", None) or (chunk.get("document_id") if isinstance(chunk, dict) else None)
+        chunk_id = (
+            getattr(chunk, "chunk_id", None)
+            or getattr(chunk, "id", None)
+            or (chunk.get("chunk_id") if isinstance(chunk, dict) else None)
+        )
+        document_id = getattr(chunk, "document_id", None) or (
+            chunk.get("document_id") if isinstance(chunk, dict) else None
+        )
 
         # Process text
         doc = self.nlp(text)
@@ -79,7 +87,7 @@ class DependencyRelationshipExtractor:
                     target=object_text,
                     type=rel_type,
                     description=f"Extracted via dependency: {verb_token.text}",
-                    confidence=0.7, # Moderate confidence for syntactic extraction
+                    confidence=0.7,  # Moderate confidence for syntactic extraction
                     bidirectional=False,
                     chunk_id=chunk_id,
                     document_id=document_id,
@@ -88,8 +96,8 @@ class DependencyRelationshipExtractor:
                         "pattern": pattern_name,
                         "verb": verb_token.text,
                         "subject": subject_text,
-                        "object": object_text
-                    }
+                        "object": object_text,
+                    },
                 )
             )
 
@@ -99,31 +107,26 @@ class DependencyRelationshipExtractor:
         try:
             return spacy.load(model_name)
         except OSError as exc:
-            raise RuntimeError(
-                f"spaCy model '{model_name}' is not installed. "
-            ) from exc
+            raise RuntimeError(f"spaCy model '{model_name}' is not installed. ") from exc
 
     def _register_patterns(self) -> None:
         """Register dependency patterns for SVO triples."""
 
         # Simple SVO: Subject -> Verb -> Object
         svo_pattern = [
-            {
-                "RIGHT_ID": "verb",
-                "RIGHT_ATTRS": {"POS": "VERB"}
-            },
+            {"RIGHT_ID": "verb", "RIGHT_ATTRS": {"POS": "VERB"}},
             {
                 "LEFT_ID": "verb",
                 "REL_OP": ">",
                 "RIGHT_ID": "subject",
-                "RIGHT_ATTRS": {"DEP": {"IN": ["nsubj", "nsubjpass"]}}
+                "RIGHT_ATTRS": {"DEP": {"IN": ["nsubj", "nsubjpass"]}},
             },
             {
                 "LEFT_ID": "verb",
                 "REL_OP": ">",
                 "RIGHT_ID": "object",
-                "RIGHT_ATTRS": {"DEP": {"IN": ["dobj", "pobj", "attr"]}} # attr handles "X is Y"
-            }
+                "RIGHT_ATTRS": {"DEP": {"IN": ["dobj", "pobj", "attr"]}},  # attr handles "X is Y"
+            },
         ]
 
         self.matcher.add("SVO", [svo_pattern])
@@ -151,7 +154,7 @@ class DependencyRelationshipExtractor:
             "contain": "CONTAINS",
             "include": "CONTAINS",
             "comprise": "CONTAINS",
-            "provide": "PROVIDES", # ambiguous
+            "provide": "PROVIDES",  # ambiguous
             "power": "PROVIDES_POWER_TO",
             "feed": "PROVIDES_POWER_TO",
             "trigger": "TRIGGERS",
@@ -164,8 +167,9 @@ class DependencyRelationshipExtractor:
         if lemma in verb_map:
             return verb_map[lemma]
 
-        # "Is" handling for hierarchies
-        if lemma == "be":
-            return "IS_A" # Very broad, might need filtering
+        # Note: IS_A relationships should come from:
+        # 1. Pattern extractor with explicit "is a type of" patterns
+        # 2. LLM extractor with semantic understanding
+        # Removed automatic IS_A for "be" verb as it was too noisy
 
         return None

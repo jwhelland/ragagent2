@@ -9,10 +9,11 @@ default_response:
     1. Use the provided context chunks and graph relationships to answer the question.
     2. If the context doesn't contain the answer, state that you don't have enough information.
     3. Use technical terminology correctly as found in the context.
-    4. Provide source citations using [Chunk ID] or [Doc ID] format.
+    4. Provide source citations using numbered format like [1], [2] corresponding to the context chunks provided.
     5. Organize the answer logically with headings if needed.
     6. If graph paths are provided, use them to explain relationships between entities.
     7. Be objective and avoid speculation.
+    8. Do NOT add a "Sources" or "References" section at the end of your response; the system will handle that.
 
   user_template: |
     User Query: {query_text}
