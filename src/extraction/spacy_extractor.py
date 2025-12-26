@@ -63,17 +63,21 @@ class SpacyExtractor:
         texts: List[str] = []
         metadata: List[Tuple[Optional[str], Optional[str]]] = []
         for chunk in chunks:
-            text = getattr(chunk, "content", None) or chunk.get("content")
+            text = getattr(chunk, "content", None)
+            if text is None and hasattr(chunk, "get"):
+                text = chunk.get("content")
+
             if text is None:
                 logger.warning("Skipping chunk without content", chunk=chunk)
                 continue
 
             chunk_id = getattr(chunk, "chunk_id", None) or getattr(chunk, "id", None)
-            if isinstance(chunk, dict):
+            if chunk_id is None and hasattr(chunk, "get"):
                 chunk_id = chunk.get("chunk_id") or chunk.get("id")
+
             document_id = getattr(chunk, "document_id", None)
-            if isinstance(chunk, dict):
-                document_id = document_id or chunk.get("document_id")
+            if document_id is None and hasattr(chunk, "get"):
+                document_id = chunk.get("document_id")
 
             texts.append(text)
             metadata.append((chunk_id, document_id))

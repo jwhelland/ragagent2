@@ -242,8 +242,12 @@ class PDFParser:
             section_counter = 0
             subsection_counter = 0
 
-            for item in result.document.iterate_items():
-                item_type = item.label if hasattr(item, "label") else ""
+            for item_iter in result.document.iterate_items():
+                # Unpack tuple if necessary (docling 2.0+ behavior)
+                item = item_iter[0] if isinstance(item_iter, tuple) and len(item_iter) > 0 else item_iter
+
+                # Get label safely
+                item_type = str(item.label) if hasattr(item, "label") else ""
 
                 # Handle different heading levels
                 if item_type == "title" or item_type == "section_header":
@@ -259,8 +263,8 @@ class PDFParser:
                         level=1,
                         title=item.text if hasattr(item, "text") else "",
                         content="",
-                        start_page=item.prov[0].page if hasattr(item, "prov") and item.prov else 1,
-                        end_page=item.prov[0].page if hasattr(item, "prov") and item.prov else 1,
+                        start_page=item.prov[0].page_no if hasattr(item, "prov") and item.prov else 1,
+                        end_page=item.prov[0].page_no if hasattr(item, "prov") and item.prov else 1,
                         hierarchy_path=str(section_counter),
                     )
                     current_subsection = None
@@ -274,10 +278,10 @@ class PDFParser:
                             title=item.text if hasattr(item, "text") else "",
                             content="",
                             start_page=(
-                                item.prov[0].page if hasattr(item, "prov") and item.prov else 1
+                                item.prov[0].page_no if hasattr(item, "prov") and item.prov else 1
                             ),
                             end_page=(
-                                item.prov[0].page if hasattr(item, "prov") and item.prov else 1
+                                item.prov[0].page_no if hasattr(item, "prov") and item.prov else 1
                             ),
                             hierarchy_path=f"{section_counter}.{subsection_counter}",
                         )
@@ -289,11 +293,11 @@ class PDFParser:
                     if current_subsection:
                         current_subsection.content += text + "\n\n"
                         if hasattr(item, "prov") and item.prov:
-                            current_subsection.end_page = item.prov[0].page
+                            current_subsection.end_page = item.prov[0].page_no
                     elif current_section:
                         current_section.content += text + "\n\n"
                         if hasattr(item, "prov") and item.prov:
-                            current_section.end_page = item.prov[0].page
+                            current_section.end_page = item.prov[0].page_no
 
                 # Handle subsection completion
                 if current_subsection and item_type in ["subtitle", "title", "section_header"]:
@@ -325,8 +329,13 @@ class PDFParser:
 
         try:
             position = 0
-            for item in result.document.iterate_items():
-                if hasattr(item, "label") and item.label == "table":
+            for item_iter in result.document.iterate_items():
+                # Unpack tuple if necessary
+                item = item_iter[0] if isinstance(item_iter, tuple) and len(item_iter) > 0 else item_iter
+                
+                label = str(item.label) if hasattr(item, "label") else ""
+                
+                if label == "table":
                     position += 1
 
                     # Extract table data
@@ -337,13 +346,16 @@ class PDFParser:
                         caption = item.caption
 
                     if hasattr(item, "export_to_markdown"):
-                        content = item.export_to_markdown()
+                        try:
+                            content = item.export_to_markdown(doc=result.document)
+                        except TypeError:
+                            content = item.export_to_markdown()
                     elif hasattr(item, "text"):
                         content = item.text
 
                     page_num = 1
                     if hasattr(item, "prov") and item.prov:
-                        page_num = item.prov[0].page
+                        page_num = item.prov[0].page_no
 
                     table = TableData(
                         table_id=f"table_{position}",
@@ -372,8 +384,13 @@ class PDFParser:
 
         try:
             position = 0
-            for item in result.document.iterate_items():
-                if hasattr(item, "label") and item.label in ["figure", "picture", "image"]:
+            for item_iter in result.document.iterate_items():
+                # Unpack tuple if necessary
+                item = item_iter[0] if isinstance(item_iter, tuple) and len(item_iter) > 0 else item_iter
+                
+                label = str(item.label) if hasattr(item, "label") else ""
+
+                if label in ["figure", "picture", "image"]:
                     position += 1
 
                     caption = ""
@@ -384,7 +401,7 @@ class PDFParser:
 
                     page_num = 1
                     if hasattr(item, "prov") and item.prov:
-                        page_num = item.prov[0].page
+                        page_num = item.prov[0].page_no
 
                     figure = FigureData(
                         figure_id=f"figure_{position}",
