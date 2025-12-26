@@ -26,6 +26,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from src.utils.config import LLMConfig, TextRewritingConfig
+from src.utils.llm_client import create_openai_client
 
 
 class RewriteResult(BaseModel):
@@ -143,13 +144,11 @@ class TextRewriter:
         raise ValueError(f"Unsupported rewriting LLM provider: {provider}")
 
     def _call_openai(self, *, system: str, user: str) -> str:
-        from openai import OpenAI
-
-        client_kwargs: Dict[str, Any] = {}
-        if self.llm.base_url:
-            client_kwargs["base_url"] = self.llm.base_url
-
-        client = OpenAI(**client_kwargs)
+        client = create_openai_client(
+            base_url=self.llm.base_url,
+            timeout=self.llm.timeout,
+            api_key=self.llm.openai_api_key if hasattr(self.llm, "openai_api_key") else None
+        )
         resp = client.chat.completions.create(
             model=self.llm.model,
             messages=[

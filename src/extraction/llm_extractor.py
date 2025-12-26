@@ -18,6 +18,7 @@ from loguru import logger
 
 from src.extraction.models import ExtractedEntity, ExtractedRelationship
 from src.utils.config import LLMConfig
+from src.utils.llm_client import create_openai_client
 
 
 class LLMExtractor:
@@ -167,9 +168,7 @@ class LLMExtractor:
         attempts = max(1, self.config.retry_attempts)
         last_error: Exception | None = None
 
-        logger.info(
-            f"Calling LLM for extraction using {self.config.provider}: {self.config.model}"
-        )
+        logger.info(f"Calling LLM for extraction using {self.config.provider}: {self.config.model}")
 
         for attempt in range(1, attempts + 1):
             try:
@@ -196,13 +195,13 @@ class LLMExtractor:
         raise RuntimeError("LLM request failed for unknown reasons")
 
     def _call_openai(self, *, system: str, user: str) -> str:
-        from openai import BadRequestError, OpenAI
+        from openai import BadRequestError
 
-        client_kwargs: Dict[str, Any] = {}
-        if self.config.base_url:
-            client_kwargs["base_url"] = self.config.base_url
-
-        client = OpenAI(**client_kwargs)
+        client = create_openai_client(
+            base_url=self.config.base_url,
+            timeout=self.config.timeout,
+            api_key=self.config.openai_api_key if hasattr(self.config, "openai_api_key") else None
+        )
 
         # Base arguments for chat completion
         completion_kwargs = {
@@ -217,13 +216,12 @@ class LLMExtractor:
         # Proactive heuristics for known restricted model families (O1, some 'mini' models)
         model_lower = self.config.model.lower()
         if "o1-" in model_lower or "mini" in model_lower:
-            pass # No temperature heuristic needed anymore
+            pass  # No temperature heuristic needed anymore
 
         try:
             # First attempt (possibly with heuristics applied)
             response = client.chat.completions.create(**completion_kwargs)
         except BadRequestError as e:
-            error_msg = str(e).lower()
             changed = False
 
             # No temperature restrictions to handle anymore
@@ -346,7 +344,9 @@ class LLMExtractor:
                 continue
 
             source = str(item.get("source") or item.get("from") or "").strip()
+            source_type = str(item.get("source_type") or "").strip().upper() or None
             target = str(item.get("target") or item.get("to") or "").strip()
+            target_type = str(item.get("target_type") or "").strip().upper() or None
             rel_type = str(item.get("type") or item.get("relationship") or "").strip()
 
             if not source or not target or not rel_type:
@@ -363,7 +363,9 @@ class LLMExtractor:
             relationships.append(
                 ExtractedRelationship(
                     source=source,
+                    source_type=source_type,
                     target=target,
+                    target_type=target_type,
                     type=rel_type.upper(),
                     description=description,
                     confidence=confidence,

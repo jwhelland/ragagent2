@@ -92,6 +92,15 @@ class SpacyConfig(BaseSettings):
     confidence_threshold: float = 0.5
 
 
+class RelationshipValidationConfig(BaseSettings):
+    """Configuration for relationship validation."""
+
+    min_confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    validate_entity_existence: bool = Field(default=True)
+    fuzzy_entity_match_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    max_entity_name_length: int = Field(default=100)
+
+
 class ExtractionConfig(BaseSettings):
     """Entity extraction configuration."""
 
@@ -140,6 +149,9 @@ class ExtractionConfig(BaseSettings):
             "CONTAINS_FIGURE",
             "CROSS_REFERENCES",
         ]
+    )
+    relationship_validation: RelationshipValidationConfig = Field(
+        default_factory=RelationshipValidationConfig
     )
 
 
@@ -260,9 +272,12 @@ class DatabaseConfig(BaseSettings):
     qdrant_https: bool = Field(default=False)
 
     # Embedding
+    embedding_provider: Literal["local", "openai"] = Field(default="local")
     embedding_model: str = Field(default="BAAI/bge-small-en-v1.5")
     embedding_dimension: int = Field(default=384)
     embedding_batch_size: int = Field(default=32)
+    embedding_base_url: str | None = Field(default=None)
+    embedding_api_key: str | None = Field(default=None)
 
 
 class Config(BaseSettings):

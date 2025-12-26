@@ -1,10 +1,11 @@
-"""Embedding generation module using FastEmbed or Sentence Transformers.
+"""Embedding generation module using FastEmbed, Sentence Transformers, or OpenAI.
 
 This module provides efficient embedding generation for document chunks and
 entities, with support for batching, caching, and text truncation.
 """
 
 import hashlib
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -13,10 +14,11 @@ from fastembed import TextEmbedding
 from loguru import logger
 
 from src.utils.config import DatabaseConfig
+from src.utils.llm_client import create_openai_client
 
 
 class EmbeddingGenerator:
-    """Generate embeddings for text using FastEmbed or Sentence Transformers.
+    """Generate embeddings for text using FastEmbed, Sentence Transformers, or OpenAI.
 
     This class handles embedding generation with batching for efficiency,
     text truncation for long inputs, and optional caching for repeated texts.
@@ -49,20 +51,35 @@ class EmbeddingGenerator:
         self._cache_hits = 0
         self._cache_misses = 0
 
+        self.provider = getattr(self.config, "embedding_provider", "local")
+
         # Load embedding model
-        try:
-            logger.info(f"Loading embedding model: {self.config.embedding_model}")
-            self.model = TextEmbedding(
-                model_name=self.config.embedding_model,
-                cache_dir=str(cache_dir) if cache_dir else None,
-            )
-            logger.success(
-                f"Loaded {self.config.embedding_model} "
-                f"({self.config.embedding_dimension}d embeddings)"
-            )
-        except Exception as e:
-            logger.error(f"Error loading embedding model: {e}")
-            raise
+        if self.provider == "openai":
+            logger.info(f"Initializing OpenAI embedding client: {self.config.embedding_model}")
+            api_key = self.config.embedding_api_key
+            base_url = self.config.embedding_base_url
+            
+            if not api_key and not base_url and not os.getenv("OPENAI_API_KEY"):
+                logger.warning("No API key provided for OpenAI embeddings. This might fail unless using a local no-auth endpoint.")
+            
+            self.client = create_openai_client(api_key=api_key, base_url=base_url)
+            self.model = None
+            logger.success(f"Initialized OpenAI client for {self.config.embedding_model}")
+        else:
+            try:
+                logger.info(f"Loading embedding model: {self.config.embedding_model}")
+                self.model = TextEmbedding(
+                    model_name=self.config.embedding_model,
+                    cache_dir=str(cache_dir) if cache_dir else None,
+                )
+                logger.success(
+                    f"Loaded {self.config.embedding_model} "
+                    f"({self.config.embedding_dimension}d embeddings)"
+                )
+                self.client = None
+            except Exception as e:
+                logger.error(f"Error loading embedding model: {e}")
+                raise
 
         # Model-specific settings
         self.max_seq_length = self._get_max_seq_length()
@@ -73,6 +90,10 @@ class EmbeddingGenerator:
         Returns:
             Maximum sequence length in tokens
         """
+        if self.provider == "openai":
+            # Most modern OpenAI embedding models support 8191 tokens
+            return 8191
+
         # Default max lengths for common models
         max_lengths = {
             "BAAI/bge-small-en-v1.5": 512,
@@ -125,7 +146,20 @@ class EmbeddingGenerator:
 
             # Generate embeddings in batches
             try:
-                generated = list(self.model.embed(truncated_texts, batch_size=batch_size))
+                if self.provider == "openai":
+                    # OpenAI client handles batching, but we might want to respect our batch_size
+                    # if the list is huge to avoid request size limits.
+                    generated = []
+                    for i in range(0, len(truncated_texts), batch_size):
+                        batch = truncated_texts[i : i + batch_size]
+                        response = self.client.embeddings.create(
+                            input=batch,
+                            model=self.config.embedding_model
+                        )
+                        # Ensure order corresponds to input
+                        generated.extend([data.embedding for data in response.data])
+                else:
+                    generated = list(self.model.embed(truncated_texts, batch_size=batch_size))
 
                 # Store in cache and result list
                 for (i, original_text), embedding in zip(texts_to_embed, generated):
@@ -347,7 +381,8 @@ class EmbeddingGenerator:
     def __repr__(self) -> str:
         """String representation of the generator."""
         return (
-            f"EmbeddingGenerator(model={self.config.embedding_model}, "
+            f"EmbeddingGenerator(provider={self.provider}, "
+            f"model={self.config.embedding_model}, "
             f"dimension={self.config.embedding_dimension}, "
             f"cache_size={len(self._cache)})"
         )

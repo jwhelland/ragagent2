@@ -19,6 +19,7 @@ from loguru import logger
 
 from src.retrieval.models import GeneratedResponse, HybridChunk, HybridRetrievalResult
 from src.utils.config import Config
+from src.utils.llm_client import create_openai_client
 
 
 class ResponseGenerator:
@@ -90,8 +91,31 @@ class ResponseGenerator:
             logger.error(f"Response generation failed: {e}")
             answer = "I'm sorry, I encountered an error while generating a response."
 
-        # Extract used chunk IDs (simple heuristic: look for [chunk_id] in answer)
-        chunks_used = [c.chunk_id for c in retrieval_result.chunks if f"[{c.chunk_id}]" in answer]
+        # Extract used chunk IDs based on numbered citations [1], [2], etc.
+        chunks_used = []
+        used_indices = []
+        for i, chunk in enumerate(retrieval_result.chunks, 1):
+            if f"[{i}]" in answer:
+                chunks_used.append(chunk.chunk_id)
+                used_indices.append(i)
+
+        # Append Sources section if citations were used
+        if used_indices:
+            sources_list = []
+            for idx in sorted(used_indices):
+                chunk = retrieval_result.chunks[idx - 1]
+                # Try to get document name from metadata or use document_id
+                doc_name = (
+                    chunk.metadata.get("document_title")
+                    or chunk.metadata.get("title")
+                    or chunk.metadata.get("filename")
+                    or chunk.metadata.get("file_name")
+                    or chunk.document_id
+                    or "Unknown Document"
+                )
+                sources_list.append(f"{idx}. {doc_name} (Chunk: {chunk.chunk_id[:8]})")
+
+            answer += "\n\n### Sources\n" + "\n".join(sources_list)
 
         generation_time = time.time() - start_time
 
@@ -133,7 +157,7 @@ class ResponseGenerator:
         formatted = []
         for i, chunk in enumerate(chunks, 1):
             formatted.append(
-                f"--- Chunk {i} [ID: {chunk.chunk_id}, Doc: {chunk.document_id}] ---\n"
+                f"--- Chunk [{i}] (ID: {chunk.chunk_id}, Doc: {chunk.document_id}) ---\n"
                 f"{chunk.content}\n"
             )
         return "\n".join(formatted) if formatted else "No relevant context chunks found."
@@ -184,13 +208,11 @@ class ResponseGenerator:
 
     def _call_openai(self, system: str, user: str) -> str:
         """Call OpenAI API."""
-        from openai import OpenAI
-
-        client_kwargs = {}
-        if self.llm_config.base_url:
-            client_kwargs["base_url"] = self.llm_config.base_url
-
-        client = OpenAI(api_key=self.config.openai_api_key, **client_kwargs)
+        client = create_openai_client(
+            api_key=self.config.openai_api_key,
+            base_url=self.llm_config.base_url,
+            timeout=self.llm_config.timeout
+        )
         response = client.chat.completions.create(
             model=self.llm_config.model,
             messages=[
