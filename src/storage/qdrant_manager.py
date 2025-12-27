@@ -582,12 +582,21 @@ class QdrantManager:
 
         # Filter by document_id
         if "document_id" in filters:
-            conditions.append(
-                FieldCondition(
-                    key="document_id",
-                    match=MatchValue(value=str(filters["document_id"])),
+            doc_id = filters["document_id"]
+            if isinstance(doc_id, list):
+                conditions.append(
+                    FieldCondition(
+                        key="document_id",
+                        match=MatchAny(any=[str(did) for did in doc_id]),
+                    )
                 )
-            )
+            else:
+                conditions.append(
+                    FieldCondition(
+                        key="document_id",
+                        match=MatchValue(value=str(doc_id)),
+                    )
+                )
 
         # Filter by level
         if "level" in filters:

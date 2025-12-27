@@ -112,6 +112,22 @@ class HybridRetriever:
         if strategy is None:
             strategy = self._select_strategy(query)
 
+        # Handle topic filtering
+        doc_ids: Optional[List[str]] = None
+        if query.topic_filter:
+            try:
+                doc_ids = self.neo4j.get_document_ids_by_topic(query.topic_filter)
+                if doc_ids:
+                    logger.info(
+                        f"Applying topic filter '{query.topic_filter}': restricting to {len(doc_ids)} documents"
+                    )
+                else:
+                    logger.warning(
+                        f"Topic filter '{query.topic_filter}' returned no documents. Proceeding with global search."
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to fetch documents for topic {query.topic_filter}: {e}")
+
         # Validate top_k
         top_k = top_k or self.reranking_config.max_results
 
@@ -124,15 +140,15 @@ class HybridRetriever:
 
         # Execute retrieval based on strategy
         if strategy == RetrievalStrategy.VECTOR_ONLY:
-            result = self._retrieve_vector_only(query, top_k, timeout)
+            result = self._retrieve_vector_only(query, top_k, timeout, doc_ids)
         elif strategy == RetrievalStrategy.GRAPH_ONLY:
-            result = self._retrieve_graph_only(query, top_k, timeout)
+            result = self._retrieve_graph_only(query, top_k, timeout, doc_ids)
         elif strategy == RetrievalStrategy.HYBRID_PARALLEL:
-            result = self._retrieve_hybrid_parallel(query, top_k, timeout)
+            result = self._retrieve_hybrid_parallel(query, top_k, timeout, doc_ids)
         elif strategy == RetrievalStrategy.VECTOR_FIRST:
-            result = self._retrieve_vector_first(query, top_k, timeout)
+            result = self._retrieve_vector_first(query, top_k, timeout, doc_ids)
         elif strategy == RetrievalStrategy.GRAPH_FIRST:
-            result = self._retrieve_graph_first(query, top_k, timeout)
+            result = self._retrieve_graph_first(query, top_k, timeout, doc_ids)
         else:
             raise ValueError(f"Unknown strategy: {strategy}")
 
@@ -222,7 +238,7 @@ class HybridRetriever:
         return RetrievalStrategy.HYBRID_PARALLEL
 
     def _retrieve_vector_only(
-        self, query: ParsedQuery, top_k: int, timeout: float
+        self, query: ParsedQuery, top_k: int, timeout: float, doc_ids: Optional[List[str]] = None
     ) -> HybridRetrievalResult:
         """Retrieve using vector search only.
 
@@ -230,6 +246,7 @@ class HybridRetriever:
             query: ParsedQuery object
             top_k: Number of results to return
             timeout: Timeout in seconds
+            doc_ids: Optional list of document IDs to filter by
 
         Returns:
             HybridRetrievalResult with vector results only
@@ -237,9 +254,11 @@ class HybridRetriever:
         start_time = time.time()
 
         try:
+            filters = {"document_id": doc_ids} if doc_ids else None
             vector_result = self.vector_retriever.retrieve(
                 query=query,
                 top_k=top_k,
+                filters=filters,
             )
             vector_time = (time.time() - start_time) * 1000
 
@@ -273,7 +292,7 @@ class HybridRetriever:
             return self._empty_result(query, RetrievalStrategy.VECTOR_ONLY, vector_success=False)
 
     def _retrieve_graph_only(
-        self, query: ParsedQuery, top_k: int, timeout: float
+        self, query: ParsedQuery, top_k: int, timeout: float, doc_ids: Optional[List[str]] = None
     ) -> HybridRetrievalResult:
         """Retrieve using graph search only.
 
@@ -281,6 +300,7 @@ class HybridRetriever:
             query: ParsedQuery object
             top_k: Number of results to return
             timeout: Timeout in seconds
+            doc_ids: Optional list of document IDs to filter by (currently unused for graph)
 
         Returns:
             HybridRetrievalResult with graph results only
@@ -325,7 +345,7 @@ class HybridRetriever:
             return self._empty_result(query, RetrievalStrategy.GRAPH_ONLY, graph_success=False)
 
     def _retrieve_hybrid_parallel(
-        self, query: ParsedQuery, top_k: int, timeout: float
+        self, query: ParsedQuery, top_k: int, timeout: float, doc_ids: Optional[List[str]] = None
     ) -> HybridRetrievalResult:
         """Retrieve using parallel vector and graph search.
 
@@ -333,6 +353,7 @@ class HybridRetriever:
             query: ParsedQuery object
             top_k: Number of results to return
             timeout: Timeout in seconds
+            doc_ids: Optional list of document IDs to filter by
 
         Returns:
             HybridRetrievalResult with merged results
@@ -347,7 +368,7 @@ class HybridRetriever:
         # Execute both retrievers in parallel
         with ThreadPoolExecutor(max_workers=2) as executor:
             # Submit both tasks
-            vector_future = executor.submit(self._safe_vector_retrieve, query)
+            vector_future = executor.submit(self._safe_vector_retrieve, query, doc_ids)
             graph_future = executor.submit(self._safe_graph_retrieve, query)
 
             # Collect results with timeout
@@ -408,7 +429,7 @@ class HybridRetriever:
         )
 
     def _retrieve_vector_first(
-        self, query: ParsedQuery, top_k: int, timeout: float
+        self, query: ParsedQuery, top_k: int, timeout: float, doc_ids: Optional[List[str]] = None
     ) -> HybridRetrievalResult:
         """Retrieve using vector first, then expand with graph.
 
@@ -416,16 +437,17 @@ class HybridRetriever:
             query: ParsedQuery object
             top_k: Number of results to return
             timeout: Timeout in seconds
+            doc_ids: Optional list of document IDs to filter by
 
         Returns:
             HybridRetrievalResult with sequential results
         """
         # For now, delegate to hybrid parallel
         # TODO: Implement sequential vector-first strategy
-        return self._retrieve_hybrid_parallel(query, top_k, timeout)
+        return self._retrieve_hybrid_parallel(query, top_k, timeout, doc_ids)
 
     def _retrieve_graph_first(
-        self, query: ParsedQuery, top_k: int, timeout: float
+        self, query: ParsedQuery, top_k: int, timeout: float, doc_ids: Optional[List[str]] = None
     ) -> HybridRetrievalResult:
         """Retrieve using graph first, then supplement with vector.
 
@@ -433,26 +455,31 @@ class HybridRetriever:
             query: ParsedQuery object
             top_k: Number of results to return
             timeout: Timeout in seconds
+            doc_ids: Optional list of document IDs to filter by
 
         Returns:
             HybridRetrievalResult with sequential results
         """
         # For now, delegate to hybrid parallel
         # TODO: Implement sequential graph-first strategy
-        return self._retrieve_hybrid_parallel(query, top_k, timeout)
+        return self._retrieve_hybrid_parallel(query, top_k, timeout, doc_ids)
 
-    def _safe_vector_retrieve(self, query: ParsedQuery) -> Tuple[Optional[RetrievalResult], float]:
+    def _safe_vector_retrieve(
+        self, query: ParsedQuery, doc_ids: Optional[List[str]] = None
+    ) -> Tuple[Optional[RetrievalResult], float]:
         """Safely execute vector retrieval with error handling.
 
         Args:
             query: ParsedQuery object
+            doc_ids: Optional list of document IDs to filter by
 
         Returns:
             Tuple of (result, time_ms) or (None, 0.0) on failure
         """
         try:
             start_time = time.time()
-            result = self.vector_retriever.retrieve(query=query)
+            filters = {"document_id": doc_ids} if doc_ids else None
+            result = self.vector_retriever.retrieve(query=query, filters=filters)
             elapsed = (time.time() - start_time) * 1000
             return result, elapsed
         except Exception as e:

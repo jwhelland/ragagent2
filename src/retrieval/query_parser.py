@@ -28,6 +28,7 @@ from src.normalization.acronym_resolver import AcronymResolver
 from src.normalization.string_normalizer import StringNormalizer
 from src.storage.schemas import EntityType, RelationshipType
 from src.utils.config import Config, RetrievalConfig
+from src.utils.llm_client import create_openai_client
 
 
 class QueryIntent(str, Enum):
@@ -89,6 +90,7 @@ class ParsedQuery(BaseModel):
         default_factory=dict, description="Term expansions (synonyms, acronyms)"
     )
     keywords: List[str] = Field(default_factory=list, description="Extracted keywords")
+    topic_filter: Optional[str] = Field(None, description="Topic to filter search by")
     requires_graph_traversal: bool = Field(
         default=False, description="Whether query requires graph operations"
     )
@@ -223,6 +225,8 @@ class QueryParser:
         acronym_resolver: Optional[AcronymResolver] = None,
         normalizer: Optional[StringNormalizer] = None,
         query_history_path: Optional[str | Path] = None,
+        neo4j_manager: Any = None,
+        llm_client: Any = None,
     ) -> None:
         """Initialize query parser.
 
@@ -231,10 +235,23 @@ class QueryParser:
             nlp: spaCy language model (if None, loads en_core_web_lg)
             acronym_resolver: Acronym resolver for query expansion
             normalizer: String normalizer for entity names
-            query_history_path: Path to store query history (default: data/queries/history.jsonl)
+            query_history_path: Path to store query history
+            neo4j_manager: Neo4j manager for fetching topics
+            llm_client: LLM client for topic classification
         """
         self.config = config or Config.from_yaml()
         self.retrieval_config: RetrievalConfig = self.config.retrieval
+
+        # Initialize LLM client and topics
+        self.llm_client = llm_client
+        self.neo4j_manager = neo4j_manager
+        self.available_topics: List[str] = []
+        if self.neo4j_manager:
+            try:
+                self.available_topics = self.neo4j_manager.list_topics()
+                logger.info(f"Loaded {len(self.available_topics)} topics for query filtering")
+            except Exception as e:
+                logger.warning(f"Failed to fetch topics: {e}")
 
         # Load spaCy model
         if nlp is None:
@@ -310,6 +327,9 @@ class QueryParser:
         expanded_terms = self._expand_query_terms(normalized)
         keywords = self._extract_keywords(doc)
 
+        # Identify topic
+        topic_filter = self._identify_topic(normalized, keywords)
+
         # Determine if graph traversal is needed
         requires_graph = self._requires_graph_traversal(intent, relationship_types, normalized)
         max_depth = self._determine_max_depth(normalized) if requires_graph else None
@@ -341,6 +361,7 @@ class QueryParser:
             constraints=constraints,
             expanded_terms=expanded_terms,
             keywords=keywords,
+            topic_filter=topic_filter,
             requires_graph_traversal=requires_graph,
             max_depth=max_depth,
             timestamp=start_time,
@@ -359,10 +380,73 @@ class QueryParser:
             intent=intent.value,
             num_entities=len(entity_mentions),
             num_relationships=len(relationship_types),
+            topic_filter=topic_filter,
             parse_time_ms=round(parse_time, 2),
         )
 
         return parsed
+
+    def _identify_topic(self, query_text: str, keywords: List[str]) -> Optional[str]:
+        """Identify if the query belongs to a specific topic.
+
+        Uses a combination of keyword matching and LLM classification.
+
+        Args:
+            query_text: Normalized query text
+            keywords: Extracted keywords
+
+        Returns:
+            Topic name or None
+        """
+        if not self.available_topics:
+            return None
+
+        # 1. Direct keyword match (fastest)
+        query_lower = query_text.lower()
+        for topic in self.available_topics:
+            if topic.lower() in query_lower:
+                return topic
+            if topic.lower() in [k.lower() for k in keywords]:
+                return topic
+
+        # 2. LLM Classification
+        try:
+            client = self.llm_client
+            llm_cfg = self.config.llm.resolve("chat")
+            
+            if not client:
+                # Initialize ad-hoc client if config allows
+                if llm_cfg.provider == "openai":
+                    client = create_openai_client(
+                        api_key=self.config.openai_api_key,
+                        base_url=llm_cfg.base_url,
+                        timeout=5.0  # Short timeout for classifier
+                    )
+
+            if client:
+                prompt = (
+                    f"Classify the following query into one of these topics: {self.available_topics}.\n"
+                    f"Query: {query_text}\n"
+                    "If the query clearly belongs to one of the topics, return ONLY the topic name.\n"
+                    "If it does not belong to any, or is ambiguous, return 'None'."
+                )
+
+                # Assume OpenAI client interface
+                response = client.chat.completions.create(
+                    model=llm_cfg.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0,
+                    max_tokens=20,
+                )
+                result = response.choices[0].message.content.strip()
+                result = result.strip("'\"")
+
+                if result in self.available_topics:
+                    return result
+        except Exception as e:
+            logger.warning(f"LLM topic classification failed: {e}")
+
+        return None
 
     def _normalize_query(self, query_text: str) -> str:
         """Normalize query text.

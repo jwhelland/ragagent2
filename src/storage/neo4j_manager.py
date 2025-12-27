@@ -338,6 +338,38 @@ class Neo4jManager:
             session.run(query, document_id=document_id, topics=topics)
             logger.debug(f"Linked document {document_id} to topics: {topics}")
 
+    def list_topics(self) -> List[str]:
+        """List all available topic names.
+
+        Returns:
+            List of topic names.
+        """
+        with self.session() as session:
+            query = """
+            MATCH (t:Topic)
+            RETURN t.name as name
+            ORDER BY t.name
+            """
+            result = session.run(query)
+            return [record["name"] for record in result]
+
+    def get_document_ids_by_topic(self, topic: str) -> List[str]:
+        """Get IDs of documents linked to a specific topic.
+
+        Args:
+            topic: Topic name.
+
+        Returns:
+            List of document IDs.
+        """
+        with self.session() as session:
+            query = """
+            MATCH (d:DOCUMENT)-[:HAS_TOPIC]->(t:Topic {name: $topic})
+            RETURN d.id as id
+            """
+            result = session.run(query, topic=topic)
+            return [record["id"] for record in result]
+
     # Candidate Operations
 
     def upsert_entity_candidate_aggregate(self, candidate: EntityCandidate) -> str:
