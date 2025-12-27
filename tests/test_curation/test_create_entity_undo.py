@@ -73,7 +73,7 @@ def test_create_entity_and_undo(tmp_path: Path) -> None:
     )
 
     assert manager.entity_upserts, "Entity should be upserted"
-    assert manager.entity_upserts[0]["canonical_name"] == "new_system"
+    assert manager.entity_upserts[0]["canonical_name"] == "New System"
     assert manager.entity_upserts[0]["entity_type"] == "SYSTEM"
 
     # Check normalization

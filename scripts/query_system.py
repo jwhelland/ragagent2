@@ -91,7 +91,7 @@ class QueryInterface:
             console.print(f"[bold red]Initialization failed: {e}[/bold red]")
             sys.exit(1)
 
-    self.history: List[Dict[str, Any]] = []
+        self.history: List[Dict[str, Any]] = []
 
     def run_interactive(self):
         """Run the interactive query loop."""
@@ -114,6 +114,10 @@ class QueryInterface:
 
                 if query_text.lower() == "history":
                     self._show_history()
+                    continue
+
+                if query_text.lower() in ["clear", "clear history"]:
+                    self._clear_history()
                     continue
 
                 # Process query
@@ -296,6 +300,7 @@ class QueryInterface:
         help_text = """
 [bold]Commands:[/bold]
   [cyan]history[/cyan] - Show query history
+  [cyan]clear[/cyan]   - Clear query history
   [cyan]exit[/cyan]    - Quit the system
   [cyan]help[/cyan]    - Show this help message
 
@@ -325,6 +330,11 @@ class QueryInterface:
             table.add_row(str(i), time_str, entry["query"], mode)
 
         console.print(table)
+
+    def _clear_history(self):
+        """Clear query history."""
+        self.history = []
+        console.print("[green]Query history cleared.[/green]")
 
     def close(self):
         """Close managers."""

@@ -70,8 +70,12 @@ class ResponseGenerator:
         """
         start_time = time.time()
 
+        # Limit context to prevent token overflow
+        # We take the top 5 chunks which should be safe for most contexts
+        context_chunks_list = retrieval_result.chunks[:5]
+
         # Format context
-        context_chunks = self._format_chunks(retrieval_result.chunks)
+        context_chunks = self._format_chunks(context_chunks_list)
         graph_paths = self._format_graph_paths(retrieval_result)
 
         # Prepare prompt context
@@ -155,10 +159,16 @@ class ResponseGenerator:
     def _format_chunks(self, chunks: List[HybridChunk]) -> str:
         """Format chunks for inclusion in prompt."""
         formatted = []
+        max_char_per_chunk = 1500
+
         for i, chunk in enumerate(chunks, 1):
+            content = chunk.content
+            if len(content) > max_char_per_chunk:
+                content = content[:max_char_per_chunk] + "... [truncated]"
+
             formatted.append(
                 f"--- Chunk [{i}] (ID: {chunk.chunk_id}, Doc: {chunk.document_id}) ---\n"
-                f"{chunk.content}\n"
+                f"{content}\n"
             )
         return "\n".join(formatted) if formatted else "No relevant context chunks found."
 
