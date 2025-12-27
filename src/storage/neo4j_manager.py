@@ -294,6 +294,16 @@ class Neo4jManager:
             except Neo4jError as e:
                 logger.warning(f"Could not create document_id index: {e}")
 
+            # Create constraint for Topic nodes
+            try:
+                session.run(
+                    "CREATE CONSTRAINT topic_name_unique IF NOT EXISTS "
+                    "FOR (t:Topic) REQUIRE t.name IS UNIQUE"
+                )
+                logger.info("Created uniqueness constraint for Topic")
+            except Neo4jError as e:
+                logger.warning(f"Could not create constraint for Topic: {e}")
+
             # Relationship property indexes require a concrete relationship type in Neo4j.
             # Since our relationships use the relationship *type* itself (e.g. :DEPENDS_ON),
             # indexing a `r.type` property isn't needed here.
@@ -303,6 +313,30 @@ class Neo4jManager:
     @staticmethod
     def _deterministic_uuid(key: str) -> str:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, key))
+
+    # Topic Operations
+
+    def save_document_topics(self, document_id: str, topics: List[str]) -> None:
+        """Link a document to one or more Topic nodes.
+
+        Args:
+            document_id: The ID of the document.
+            topics: A list of topic names.
+        """
+        if not topics:
+            return
+
+        with self.session() as session:
+            # We use MERGE for topics to ensure we don't duplicate them.
+            # We use MERGE for the relationship to avoid duplicate links.
+            query = """
+            MATCH (d:DOCUMENT {id: $document_id})
+            UNWIND $topics AS topic_name
+            MERGE (t:Topic {name: topic_name})
+            MERGE (d)-[:HAS_TOPIC]->(t)
+            """
+            session.run(query, document_id=document_id, topics=topics)
+            logger.debug(f"Linked document {document_id} to topics: {topics}")
 
     # Candidate Operations
 

@@ -296,7 +296,11 @@ class IngestionPipeline:
         logger.debug("All pipeline components initialized")
 
     def process_document(
-        self, pdf_path: Path | str, *, force_reingest: bool = False
+        self,
+        pdf_path: Path | str,
+        *,
+        force_reingest: bool = False,
+        topics: List[str] | None = None,
     ) -> IngestionResult:
         """Process a single document end-to-end.
 
@@ -309,6 +313,7 @@ class IngestionPipeline:
         Args:
             pdf_path: Path to the document file (.pdf, .txt, .md)
             force_reingest: If True, ignore checkpoint skip and reprocess the document (after cleanup)
+            topics: Optional list of topics to link the document to.
 
         Returns:
             IngestionResult with processing details
@@ -511,6 +516,10 @@ class IngestionPipeline:
             # Step 6: Store in databases
             logger.debug("Step 7: Storing in databases")
             self._store_document_and_chunks(parsed_doc, chunks, embeddings)
+
+            if topics:
+                logger.debug(f"Step 7a: Linking to topics: {topics}")
+                neo4j_manager.save_document_topics(parsed_doc.document_id, topics)
 
             # Step 7b: Store entity/relationship candidates for curation
             logger.debug("Step 7b: Storing extraction candidates")
@@ -994,13 +1003,18 @@ class IngestionPipeline:
         return l1_chunks
 
     def process_batch(
-        self, pdf_paths: List[Path | str], *, force_reingest: bool = False
+        self,
+        pdf_paths: List[Path | str],
+        *,
+        force_reingest: bool = False,
+        topics: List[str] | None = None,
     ) -> List[IngestionResult]:
         """Process multiple PDF documents.
 
         Args:
             pdf_paths: List of paths to PDF files
             force_reingest: If True, ignore checkpoint skip and reprocess documents (after cleanup)
+            topics: Optional list of topics to link all documents in this batch to.
 
         Returns:
             List of IngestionResult objects
@@ -1009,7 +1023,9 @@ class IngestionPipeline:
 
         results = []
         for pdf_path in pdf_paths:
-            result = self.process_document(pdf_path, force_reingest=force_reingest)
+            result = self.process_document(
+                pdf_path, force_reingest=force_reingest, topics=topics
+            )
             results.append(result)
 
             # Log progress

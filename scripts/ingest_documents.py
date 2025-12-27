@@ -122,6 +122,13 @@ def main():
         help="Reprocess even if checksum/status indicate the document was already completed",
     )
 
+    parser.add_argument(
+        "--topic",
+        "-t",
+        action="append",
+        help="Topic to link the document(s) to (can be used multiple times)",
+    )
+
     args = parser.parse_args()
 
     # Collect all paths to process
@@ -186,7 +193,9 @@ def main():
             results = []
             for i, pdf_path in enumerate(pdf_files, 1):
                 logger.info(f"Processing {i}/{len(pdf_files)}: {pdf_path.name}")
-                result = pipeline.process_document(pdf_path, force_reingest=args.force_reingest)
+                result = pipeline.process_document(
+                    pdf_path, force_reingest=args.force_reingest, topics=args.topic
+                )
                 results.append(result)
 
                 if result.success:
@@ -199,7 +208,9 @@ def main():
         else:
             # Process in batches
             logger.info(f"Processing in batches of {args.batch_size}")
-            results = pipeline.process_batch(pdf_files, force_reingest=args.force_reingest)
+            results = pipeline.process_batch(
+                pdf_files, force_reingest=args.force_reingest, topics=args.topic
+            )
 
         # Calculate statistics
         total_time = time.time() - start_time
