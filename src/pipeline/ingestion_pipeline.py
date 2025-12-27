@@ -13,11 +13,11 @@ import re
 import threading
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, DefaultDict, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, DefaultDict, Dict, List, Optional, Tuple
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
@@ -1206,6 +1206,34 @@ class IngestionPipeline:
 
         return total
 
+    def _process_single_chunk_entities(
+        self, chunk: Any
+    ) -> Tuple[str | None, List[ExtractedEntity]]:
+        """Helper to process a single chunk for LLM entity extraction."""
+        metadata = getattr(chunk, "metadata", {}) or {}
+        chunk_id = getattr(chunk, "chunk_id", None)
+        try:
+            if not self.llm_extractor:
+                return chunk_id, []
+
+            entities = self.llm_extractor.extract_entities(
+                chunk,
+                document_context={
+                    "document_title": metadata.get("document_title"),
+                    "section_title": metadata.get("section_title")
+                    or metadata.get("hierarchy_path"),
+                    "page_numbers": metadata.get("page_numbers"),
+                },
+            )
+            return chunk_id, entities
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "LLM entity extraction failed for chunk",
+                chunk_id=chunk_id,
+                error=str(exc),
+            )
+            return chunk_id, []
+
     def _extract_llm_entities(
         self, chunks: List[Any], progress: ExtractionProgress | None = None
     ) -> int:
@@ -1215,49 +1243,51 @@ class IngestionPipeline:
 
         total = 0
         llm_entities_by_chunk: DefaultDict[str | None, List[Any]] = defaultdict(list)
-        for chunk in chunks:
-            metadata = getattr(chunk, "metadata", {}) or {}
-            try:
-                entities = self.llm_extractor.extract_entities(
-                    chunk,
-                    document_context={
-                        "document_title": metadata.get("document_title"),
-                        "section_title": metadata.get("section_title")
-                        or metadata.get("hierarchy_path"),
-                        "page_numbers": metadata.get("page_numbers"),
-                    },
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "LLM entity extraction failed for chunk",
-                    chunk_id=getattr(chunk, "chunk_id", None),
-                    error=str(exc),
-                )
-                entities = []
+        chunk_map = {getattr(c, "chunk_id"): c for c in chunks}
 
-            if entities:
-                total += len(entities)
-                metadata.setdefault("llm_entities", [])
-                llm_entities_by_chunk[getattr(chunk, "chunk_id", None)].extend(entities)
+        max_workers = (
+            self.config.extraction.max_parallel_calls
+            if self.config.extraction.parallel_extraction
+            else 1
+        )
 
-                for ent in entities:
-                    metadata["llm_entities"].append(
-                        {
-                            "name": ent.name,
-                            "type": ent.type,
-                            "description": ent.description,
-                            "aliases": ent.aliases,
-                            "confidence": ent.confidence,
-                            "source": ent.source,
-                            "chunk_id": ent.chunk_id or getattr(chunk, "chunk_id", None),
-                            "document_id": ent.document_id or getattr(chunk, "document_id", None),
-                        }
-                    )
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_chunk = {
+                executor.submit(self._process_single_chunk_entities, chunk): chunk
+                for chunk in chunks
+            }
 
-                if hasattr(chunk, "metadata"):
-                    chunk.metadata = metadata
-            if progress:
-                progress.update("llm_entities")
+            for future in as_completed(future_to_chunk):
+                chunk_id, entities = future.result()
+
+                if entities:
+                    total += len(entities)
+                    llm_entities_by_chunk[chunk_id].extend(entities)
+
+                    chunk = chunk_map.get(chunk_id)
+                    if chunk:
+                        metadata = getattr(chunk, "metadata", {}) or {}
+                        metadata.setdefault("llm_entities", [])
+
+                        for ent in entities:
+                            metadata["llm_entities"].append(
+                                {
+                                    "name": ent.name,
+                                    "type": ent.type,
+                                    "description": ent.description,
+                                    "aliases": ent.aliases,
+                                    "confidence": ent.confidence,
+                                    "source": ent.source,
+                                    "chunk_id": ent.chunk_id or chunk_id,
+                                    "document_id": ent.document_id
+                                    or getattr(chunk, "document_id", None),
+                                }
+                            )
+
+                        chunk.metadata = metadata
+
+                if progress:
+                    progress.update("llm_entities")
 
         self._llm_entities_by_chunk = dict(llm_entities_by_chunk)
         if progress and not chunks:
@@ -1476,6 +1506,37 @@ class IngestionPipeline:
 
         return total
 
+    def _process_single_chunk_relationships(self, chunk: Any) -> Tuple[str | None, List[Any]]:
+        """Helper to process a single chunk for LLM relationship extraction."""
+        metadata = getattr(chunk, "metadata", {}) or {}
+        chunk_id = getattr(chunk, "chunk_id", None)
+
+        known_entities = []
+        known_entities.extend(metadata.get("llm_entities", []))
+        known_entities.extend(metadata.get("spacy_entities", []))
+
+        try:
+            if not self.llm_extractor:
+                return chunk_id, []
+
+            relationships = self.llm_extractor.extract_relationships(
+                chunk,
+                known_entities=known_entities,
+                document_context={
+                    "document_title": metadata.get("document_title"),
+                    "section_title": metadata.get("section_title")
+                    or metadata.get("hierarchy_path"),
+                },
+            )
+            return chunk_id, relationships
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "LLM relationship extraction failed for chunk",
+                chunk_id=chunk_id,
+                error=str(exc),
+            )
+            return chunk_id, []
+
     def _extract_llm_relationships(
         self, chunks: List[Any], progress: ExtractionProgress | None = None
     ) -> int:
@@ -1485,121 +1546,130 @@ class IngestionPipeline:
 
         total = 0
         total_filtered = 0
+        chunk_map = {getattr(c, "chunk_id"): c for c in chunks}
 
-        for chunk in chunks:
-            metadata = getattr(chunk, "metadata", {}) or {}
-            known_entities = []
-            known_entities.extend(metadata.get("llm_entities", []))
-            known_entities.extend(metadata.get("spacy_entities", []))
+        max_workers = (
+            self.config.extraction.max_parallel_calls
+            if self.config.extraction.parallel_extraction
+            else 1
+        )
 
-            try:
-                relationships = self.llm_extractor.extract_relationships(
-                    chunk,
-                    known_entities=known_entities,
-                    document_context={
-                        "document_title": metadata.get("document_title"),
-                        "section_title": metadata.get("section_title")
-                        or metadata.get("hierarchy_path"),
-                    },
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "LLM relationship extraction failed for chunk",
-                    chunk_id=getattr(chunk, "chunk_id", None),
-                    error=str(exc),
-                )
-                relationships = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_chunk = {
+                executor.submit(self._process_single_chunk_relationships, chunk): chunk
+                for chunk in chunks
+            }
 
-            if relationships:
-                # Convert to dicts for validation and handle auto-discovery
-                rel_dicts = []
-                new_entities_discovered = []
+            for future in as_completed(future_to_chunk):
+                chunk_id, relationships = future.result()
+                chunk = chunk_map.get(chunk_id)
+                if not chunk:
+                    if progress:
+                        progress.update("llm_relationships")
+                    continue
 
-                for rel in relationships:
-                    rel_dict = {
-                        "source": rel.source,
-                        "source_type": rel.source_type,
-                        "type": rel.type,
-                        "target": rel.target,
-                        "target_type": rel.target_type,
-                        "description": rel.description,
-                        "confidence": rel.confidence,
-                        "bidirectional": rel.bidirectional,
-                        "chunk_id": rel.chunk_id or getattr(chunk, "chunk_id", None),
-                        "document_id": rel.document_id or getattr(chunk, "document_id", None),
-                        "source_extractor": rel.source_extractor,
-                    }
-                    rel_dicts.append(rel_dict)
+                metadata = getattr(chunk, "metadata", {}) or {}
+                known_entities = []
+                known_entities.extend(metadata.get("llm_entities", []))
+                known_entities.extend(metadata.get("spacy_entities", []))
 
-                    # Auto-discovery logic: Check if source or target are unknown
-                    for side_name, side_type in [
-                        (rel.source, rel.source_type),
-                        (rel.target, rel.target_type),
-                    ]:
-                        if not side_name or not side_type:
-                            continue
+                if relationships:
+                    # Convert to dicts for validation and handle auto-discovery
+                    rel_dicts = []
+                    new_entities_discovered = []
 
-                        # Check if this entity is already known (fuzzy check)
-                        is_known = False
-                        side_norm = self.string_normalizer.normalize(side_name).normalized
+                    for rel in relationships:
+                        rel_dict = {
+                            "source": rel.source,
+                            "source_type": rel.source_type,
+                            "type": rel.type,
+                            "target": rel.target,
+                            "target_type": rel.target_type,
+                            "description": rel.description,
+                            "confidence": rel.confidence,
+                            "bidirectional": rel.bidirectional,
+                            "chunk_id": rel.chunk_id or getattr(chunk, "chunk_id", None),
+                            "document_id": rel.document_id or getattr(chunk, "document_id", None),
+                            "source_extractor": rel.source_extractor,
+                        }
+                        rel_dicts.append(rel_dict)
 
-                        # Check against existing entities in this chunk
-                        for ent in known_entities:
-                            ent_name = str(ent.get("name") or ent.get("canonical_name") or "")
-                            ent_norm = self.string_normalizer.normalize(ent_name).normalized
-                            if side_norm == ent_norm:
-                                is_known = True
-                                break
+                        # Auto-discovery logic: Check if source or target are unknown
+                        for side_name, side_type in [
+                            (rel.source, rel.source_type),
+                            (rel.target, rel.target_type),
+                        ]:
+                            if not side_name or not side_type:
+                                continue
 
-                        if not is_known:
-                            # Synthesize a new entity
-                            new_ent = {
-                                "name": side_name,
-                                "type": side_type,
-                                "description": f"Discovered via relationship to {rel.target if side_name == rel.source else rel.source}",
-                                "confidence": rel.confidence
-                                * 0.8,  # Slightly lower confidence for discovered entities
-                                "source": "llm_discovery",
-                                "chunk_id": getattr(chunk, "chunk_id", None),
-                                "document_id": getattr(chunk, "document_id", None),
-                            }
-                            new_entities_discovered.append(new_ent)
-                            known_entities.append(new_ent)  # Add to validation context immediately
+                            # Check if this entity is already known (fuzzy check)
+                            is_known = False
+                            side_norm = self.string_normalizer.normalize(side_name).normalized
 
-                            # Add to chunk metadata so it gets merged later
-                            metadata.setdefault("llm_entities", []).append(new_ent)
+                            # Check against existing entities in this chunk
+                            for ent in known_entities:
+                                ent_name = str(ent.get("name") or ent.get("canonical_name") or "")
+                                ent_norm = self.string_normalizer.normalize(ent_name).normalized
+                                if side_norm == ent_norm:
+                                    is_known = True
+                                    break
 
-                            # Also update the pipeline cache for propagation
-                            chunk_id = getattr(chunk, "chunk_id", None)
-                            if chunk_id not in self._llm_entities_by_chunk:
-                                self._llm_entities_by_chunk[chunk_id] = []
+                            if not is_known:
+                                # Synthesize a new entity
+                                new_ent = {
+                                    "name": side_name,
+                                    "type": side_type,
+                                    "description": f"Discovered via relationship to {rel.target if side_name == rel.source else rel.source}",
+                                    "confidence": rel.confidence
+                                    * 0.8,  # Slightly lower confidence for discovered entities
+                                    "source": "llm_discovery",
+                                    "chunk_id": getattr(chunk, "chunk_id", None),
+                                    "document_id": getattr(chunk, "document_id", None),
+                                }
+                                new_entities_discovered.append(new_ent)
+                                known_entities.append(
+                                    new_ent
+                                )  # Add to validation context immediately
 
-                            self._llm_entities_by_chunk[chunk_id].append(ExtractedEntity(**new_ent))
+                                # Add to chunk metadata so it gets merged later
+                                metadata.setdefault("llm_entities", []).append(new_ent)
 
-                if new_entities_discovered:
-                    logger.info(
-                        f"Discovered {len(new_entities_discovered)} new entities via relationships in chunk {getattr(chunk, 'chunk_id', 'unknown')}"
-                    )
+                                # Also update the pipeline cache for propagation
+                                chunk_id = getattr(chunk, "chunk_id", None)
+                                if chunk_id not in self._llm_entities_by_chunk:
+                                    self._llm_entities_by_chunk[chunk_id] = []
 
-                # Validate relationships
-                if self.relationship_validator:
-                    valid_rels, rejected_rels = self.relationship_validator.filter_relationships(
-                        rel_dicts, known_entities
-                    )
-                    total_filtered += len(rejected_rels)
+                                self._llm_entities_by_chunk[chunk_id].append(
+                                    ExtractedEntity(**new_ent)
+                                )
 
-                    if valid_rels:
-                        metadata.setdefault("llm_relationships", []).extend(valid_rels)
-                        total += len(valid_rels)
-                else:
-                    # No validation - store all relationships
-                    metadata.setdefault("llm_relationships", []).extend(rel_dicts)
-                    total += len(rel_dicts)
+                    if new_entities_discovered:
+                        logger.info(
+                            f"Discovered {len(new_entities_discovered)} new entities via relationships in chunk {getattr(chunk, 'chunk_id', 'unknown')}"
+                        )
 
-                if hasattr(chunk, "metadata"):
-                    chunk.metadata = metadata
-            if progress:
-                progress.update("llm_relationships")
+                    # Validate relationships
+                    if self.relationship_validator:
+                        valid_rels, rejected_rels = (
+                            self.relationship_validator.filter_relationships(
+                                rel_dicts, known_entities
+                            )
+                        )
+                        total_filtered += len(rejected_rels)
+
+                        if valid_rels:
+                            metadata.setdefault("llm_relationships", []).extend(valid_rels)
+                            total += len(valid_rels)
+                    else:
+                        # No validation - store all relationships
+                        metadata.setdefault("llm_relationships", []).extend(rel_dicts)
+                        total += len(rel_dicts)
+
+                    if hasattr(chunk, "metadata"):
+                        chunk.metadata = metadata
+
+                if progress:
+                    progress.update("llm_relationships")
 
         if total_filtered > 0:
             logger.info(f"Filtered {total_filtered} LLM relationships (kept {total})")

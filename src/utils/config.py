@@ -151,6 +151,8 @@ class ExtractionConfig(BaseSettings):
 
     enable_llm: bool = False
     llm_prompt_template: str = "config/extraction_prompts.yaml"
+    parallel_extraction: bool = True
+    max_parallel_calls: int = 2
     spacy: SpacyConfig = Field(default_factory=SpacyConfig)
     entity_types: List[str] = Field(
         default=[
