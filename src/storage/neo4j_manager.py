@@ -405,12 +405,13 @@ class Neo4jManager:
                 [d IN $source_documents WHERE NOT d IN coalesce(c.source_documents, [])]
             SET c.chunk_ids = coalesce(c.chunk_ids, []) +
                 [ch IN $chunk_ids WHERE NOT ch IN coalesce(c.chunk_ids, [])]
-            SET c.aliases = coalesce(c.aliases, []) +
-                [a IN $aliases WHERE NOT a IN coalesce(c.aliases, [])]
-            SET c.conflicting_types = coalesce(c.conflicting_types, []) +
-                [t IN $conflicting_types WHERE NOT t IN coalesce(c.conflicting_types, [])]
             SET c.provenance_events = coalesce(c.provenance_events, []) +
                 [p IN $provenance_events WHERE NOT p IN coalesce(c.provenance_events, [])]
+            WITH c
+            FOREACH (doc_id IN $source_documents |
+                MERGE (d:DOCUMENT {id: doc_id})
+                MERGE (c)-[:MENTIONED_IN]->(d)
+            )
             RETURN c.id as id
             """
             result = session.run(
@@ -816,6 +817,11 @@ class Neo4jManager:
                 [ch IN $chunk_ids WHERE NOT ch IN coalesce(c.chunk_ids, [])]
             SET c.provenance_events = coalesce(c.provenance_events, []) +
                 [p IN $provenance_events WHERE NOT p IN coalesce(c.provenance_events, [])]
+            WITH c
+            FOREACH (doc_id IN $source_documents |
+                MERGE (d:DOCUMENT {id: doc_id})
+                MERGE (c)-[:MENTIONED_IN]->(d)
+            )
             RETURN c.id as id
             """
             result = session.run(
@@ -934,6 +940,7 @@ class Neo4jManager:
         """Create or update an entity node in Neo4j (idempotent).
 
         Uses MERGE on id and overwrites properties with the provided values.
+        Also creates MENTIONED_IN relationships to source documents.
 
         Args:
             entity: Entity instance to upsert
@@ -945,10 +952,20 @@ class Neo4jManager:
             query = f"""
             MERGE (n:Entity:{entity.entity_type.value} {{id: $entity_id}})
             SET n += $props
+            WITH n
+            FOREACH (doc_id IN $source_documents |
+                MERGE (d:DOCUMENT {{id: doc_id}})
+                MERGE (n)-[:MENTIONED_IN]->(d)
+            )
             RETURN n.id as id
             """
             props = entity.to_neo4j_dict()
-            result = session.run(query, entity_id=entity.id, props=props)
+            result = session.run(
+                query,
+                entity_id=entity.id,
+                props=props,
+                source_documents=entity.source_documents,
+            )
             entity_id = result.single()["id"]
             logger.debug(f"Upserted entity {entity_id} of type {entity.entity_type.value}")
             return entity_id
@@ -1437,6 +1454,9 @@ class Neo4jManager:
         """Create or update a chunk node in Neo4j (idempotent).
 
         Uses MERGE on id and overwrites properties with the provided values.
+        Also creates structural relationships:
+        - (Chunk)-[:PART_OF]->(Document)
+        - (Chunk)-[:PARENT_CHUNK]->(ParentChunk)
 
         Args:
             chunk: Chunk instance to upsert
@@ -1448,10 +1468,28 @@ class Neo4jManager:
             query = """
             MERGE (c:Chunk {id: $chunk_id})
             SET c += $props
+            WITH c
+            MATCH (d:DOCUMENT {id: $document_id})
+            MERGE (c)-[:PART_OF]->(d)
+            WITH c
+            CALL {
+                WITH c
+                WITH c
+                WHERE $parent_chunk_id IS NOT NULL
+                MATCH (p:Chunk {id: $parent_chunk_id})
+                MERGE (c)-[:PARENT_CHUNK]->(p)
+                RETURN count(*) as _
+            }
             RETURN c.id as id
             """
             props = chunk.to_neo4j_dict()
-            result = session.run(query, chunk_id=chunk.id, props=props)
+            result = session.run(
+                query,
+                chunk_id=chunk.id,
+                props=props,
+                document_id=chunk.document_id,
+                parent_chunk_id=chunk.parent_chunk_id,
+            )
             chunk_id = result.single()["id"]
             logger.debug(f"Upserted chunk {chunk_id}")
             return chunk_id
